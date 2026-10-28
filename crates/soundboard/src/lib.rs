@@ -219,7 +219,15 @@ impl SoundBoard {
     /// 从一个定义创建播放实例（解码文件；失败返回 None）。
     /// Create a playing instance from a spec (decode file; None on failure).
     fn make_instance(&self, spec: &SoundSpec) -> Option<Instance> {
-        let source = VarispeedSource::from_wav(&spec.file_path).ok()?;
+        // 支持 WAV/MP3/FLAC/OGG/AAC 等多格式。
+        // Support WAV/MP3/FLAC/OGG/AAC etc.
+        let source = match VarispeedSource::from_file(&spec.file_path) {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("加载音效失败 failed to load sound {}: {e}", spec.file_path.display());
+                return None;
+            }
+        };
         Some(Instance {
             sound_id: spec.id,
             source,

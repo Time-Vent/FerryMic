@@ -15,9 +15,11 @@
 
 #![forbid(unsafe_code)]
 
+mod audio_file;
 mod varispeed;
 pub mod wav_file;
 
+pub use audio_file::decode_audio_file;
 pub use varispeed::VarispeedSource;
 pub use wav_file::{DecodedAudio, SourceError, WavFileSource};
 

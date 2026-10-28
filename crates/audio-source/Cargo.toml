@@ -8,3 +8,4 @@ license.workspace = true
 audio-types = { workspace = true }
 hound = { workspace = true }
 thiserror = { workspace = true }
+symphonia = { version = "0.5", features = ["mp3", "flac", "ogg", "aac", "wav", "pcm", "isomp4"] }

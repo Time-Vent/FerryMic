@@ -54,6 +54,13 @@ impl VarispeedSource {
         Ok(Self::new(file.into_decoded()))
     }
 
+    /// 从任意支持的音频文件构造（WAV/MP3/FLAC/OGG/AAC 等）。
+    /// Construct from any supported audio file (WAV/MP3/FLAC/OGG/AAC etc.).
+    pub fn from_file(path: &std::path::Path) -> Result<Self, crate::wav_file::SourceError> {
+        let decoded = crate::audio_file::decode_audio_file(path)?;
+        Ok(Self::new(decoded))
+    }
+
     /// 源总帧数。Total source frames.
     pub fn total_frames(&self) -> usize {
         self.samples.len() / self.channels.max(1)

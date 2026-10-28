@@ -9,6 +9,7 @@ audio-types = { workspace = true }
 audio-source = { workspace = true }
 thiserror = { workspace = true }
 serde = { version = "1", features = ["derive"] }
+log = { workspace = true }
 
 [dev-dependencies]
 hound = { workspace = true }
