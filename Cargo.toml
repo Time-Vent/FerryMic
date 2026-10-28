@@ -8,6 +8,7 @@ members = [
     "crates/audio-source",
     "crates/audio-engine",
     "crates/application",
+    "crates/soundboard",
     "adapters/audio-cpal",
     "apps/desktop",
 ]
@@ -27,6 +28,7 @@ audio-graph = { path = "crates/audio-graph" }
 audio-source = { path = "crates/audio-source" }
 audio-engine = { path = "crates/audio-engine" }
 application = { path = "crates/application" }
+soundboard = { path = "crates/soundboard" }
 audio-cpal = { path = "adapters/audio-cpal" }
 
 # 外部依赖（统一版本）

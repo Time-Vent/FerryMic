@@ -21,7 +21,7 @@
 
 use std::collections::HashMap;
 
-use audio_source::VarispeedSource;
+use audio_source::{VariableRateSource, VarispeedSource};
 
 /// 音效唯一标识。Sound unique identifier.
 pub type SoundId = u32;
@@ -38,10 +38,10 @@ pub enum TriggerMode {
     Loop,
     /// 独占：播放时停止其它所有音效，同一时刻只播这一个。
     /// Exclusive: stops all other sounds when triggered; only this one plays.
-    Overlap,
+    Exclusive,
     /// 叠加：可与其它音效同时播放。
     /// Overlap: can play simultaneously with other sounds.
-    Mix,
+    Overlap,
 }
 
 /// 一个音效的定义（控制侧配置，可跨线程共享）。
@@ -205,9 +205,9 @@ impl SoundBoard {
                     self.instances.push(inst);
                 }
             }
-            TriggerMode::Mix => {
-                // 叠加：直接新建实例。
-                // Mix: just create a new instance.
+            TriggerMode::Overlap => {
+                // 叠加：直接新建实例，可与其它音效同时播放。
+                // Overlap: just create a new instance, can play with others.
                 if let Some(inst) = self.make_instance(&spec) {
                     self.instances.push(inst);
                 }
@@ -257,19 +257,22 @@ impl SoundBoard {
         // 逐实例混音。Mix each instance.
         let mut idx = 0;
         while idx < self.instances.len() {
-            let inst = &mut self.instances[idx];
-            let src_ch = inst.source.channels().max(1);
-
-            // 用 scratch 作为该实例的临时输出。
-            // Use scratch as this instance's temp output.
-            let written = self.fill_instance(inst, frames, src_ch);
+            // 在借用作用域内填充实例并取出所需值（避免与 self 的其它字段借用冲突）。
+            // Fill the instance and extract needed values within a borrow scope
+            // (avoids conflicting borrows with other `self` fields).
+            let (src_ch, written, gain_lin, done) = {
+                let inst = &mut self.instances[idx];
+                let src_ch = inst.source.channels().max(1);
+                let written = Self::fill_instance(&mut self.scratch, inst, frames, src_ch);
+                (src_ch, written, inst.gain_lin, inst.done)
+            };
 
             // 声道转换并累加（scratch → out）。
             // Channel-convert and accumulate (scratch → out).
-            self.accumulate(src_ch, channels, frames, written, inst.gain_lin, out);
+            Self::accumulate(&self.scratch, src_ch, channels, written, gain_lin, out);
 
             // 移除已结束的实例。Remove finished instances.
-            if inst.done {
+            if done {
                 self.instances.swap_remove(idx);
             } else {
                 idx += 1;
@@ -279,14 +282,25 @@ impl SoundBoard {
 
     /// 填充单个实例（到 scratch），处理循环与结束标记。
     /// Fill a single instance (into scratch), handle looping and done flag.
-    fn fill_instance(&mut self, inst: &mut Instance, frames: usize, src_ch: usize) -> usize {
+    ///
+    /// 关联函数（不借 `self`），使调用方可同时借用 `instances` 与 `scratch` 两个字段。
+    /// Associated function (doesn't borrow `self`), so the caller can borrow both
+    /// `instances` and `scratch` fields simultaneously.
+    fn fill_instance(
+        scratch: &mut [f32],
+        inst: &mut Instance,
+        frames: usize,
+        src_ch: usize,
+    ) -> usize {
         let mut written = 0usize;
         while written < frames && !inst.done {
             let remaining = frames - written;
             let seg_start = written * src_ch;
-            let n = inst
-                .source
-                .fill(&mut self.scratch[seg_start..seg_start + remaining * src_ch], remaining, inst.speed);
+            let n = inst.source.fill(
+                &mut scratch[seg_start..seg_start + remaining * src_ch],
+                remaining,
+                inst.speed,
+            );
             written += n;
 
             if inst.source.is_exhausted() {
@@ -305,7 +319,7 @@ impl SoundBoard {
             }
         }
         // 未写满的部分补静音。Pad silence for the unfilled part.
-        for s in self.scratch[written * src_ch..frames * src_ch].iter_mut() {
+        for s in scratch[written * src_ch..frames * src_ch].iter_mut() {
             *s = 0.0;
         }
         written
@@ -313,11 +327,12 @@ impl SoundBoard {
 
     /// 把 scratch 中该实例的输出（src_ch 声道）累加到 out（dst_ch 声道）。
     /// Accumulate this instance's output (src_ch) into out (dst_ch).
+    ///
+    /// 关联函数（不借 `self`）。Associated function (doesn't borrow `self`).
     fn accumulate(
-        &self,
+        scratch: &[f32],
         src_ch: usize,
         dst_ch: usize,
-        frames: usize,
         written: usize,
         gain_lin: f32,
         out: &mut [f32],
@@ -326,11 +341,10 @@ impl SoundBoard {
         for f in 0..written {
             for c in 0..dst_ch {
                 let src_c = if src_ch == 1 { 0 } else { c.min(src_ch - 1) };
-                let sample = self.scratch[f * src_ch + src_c] * gain_lin;
+                let sample = scratch[f * src_ch + src_c] * gain_lin;
                 out[f * dst_ch + c] += sample;
             }
         }
-        let _ = frames;
     }
 }
 
@@ -412,5 +426,98 @@ mod tests {
         let mut out = [0.5f32; 4];
         board.fill(&mut out, 2, 2);
         assert_eq!(out, [0.0; 4]);
+    }
+
+    /// 生成一个含正弦波的临时 WAV，返回路径。
+    /// Generate a temp WAV containing a sine wave; returns its path.
+    fn make_test_wav(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(&path, spec).unwrap();
+        for i in 0..4800 {
+            let s = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48_000.0).sin();
+            w.write_sample((s * 30000.0) as i16).unwrap();
+        }
+        w.finalize().unwrap();
+        path
+    }
+
+    /// 端到端：触发一个真实音效，fill 应产出非零音频。
+    /// End-to-end: trigger a real sound; fill should produce non-zero audio.
+    #[test]
+    fn trigger_real_sound_produces_audio() {
+        let dir = std::env::temp_dir().join("soundboard-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = make_test_wav(&dir, "sine.wav");
+
+        let mut board = SoundBoard::new(4800);
+        board.apply_command(&BoardCommand::AddSound(SoundSpec {
+            id: 1,
+            name: "sine".into(),
+            file_path: wav,
+            trigger_mode: TriggerMode::OneShot,
+            gain_db: 0.0,
+            speed: 1.0,
+            hotkey: None,
+        }));
+
+        // 触发后应有 1 个实例。After trigger, 1 instance.
+        board.apply_command(&BoardCommand::Trigger { sound_id: 1 });
+        assert_eq!(board.instance_count(), 1);
+
+        // fill 一帧应输出非零（正弦波非静音）。
+        // A fill should output non-zero (sine is not silence).
+        let mut out = vec![0.0f32; 512];
+        board.fill(&mut out, 512, 1);
+        let peak = out.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+        assert!(peak > 0.01, "预期有声音，实际峰值 peak={peak}");
+
+        // 清理。Cleanup.
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 独占模式：触发后应只有一个实例，且播放新音效会清空旧的。
+    /// Exclusive mode: triggering should clear existing instances.
+    #[test]
+    fn exclusive_trigger_clears_others() {
+        let dir = std::env::temp_dir().join("soundboard-test-excl");
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav1 = make_test_wav(&dir, "a.wav");
+        let wav2 = make_test_wav(&dir, "b.wav");
+
+        let mut board = SoundBoard::new(4800);
+        board.apply_command(&BoardCommand::AddSound(SoundSpec {
+            id: 1,
+            name: "a".into(),
+            file_path: wav1,
+            trigger_mode: TriggerMode::Exclusive,
+            gain_db: 0.0,
+            speed: 1.0,
+            hotkey: None,
+        }));
+        board.apply_command(&BoardCommand::AddSound(SoundSpec {
+            id: 2,
+            name: "b".into(),
+            file_path: wav2,
+            trigger_mode: TriggerMode::Exclusive,
+            gain_db: 0.0,
+            speed: 1.0,
+            hotkey: None,
+        }));
+
+        board.apply_command(&BoardCommand::Trigger { sound_id: 1 });
+        assert_eq!(board.instance_count(), 1);
+
+        // 触发第二个独占音效 → 清空第一个。
+        // Trigger second exclusive sound → clears the first.
+        board.apply_command(&BoardCommand::Trigger { sound_id: 2 });
+        assert_eq!(board.instance_count(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
