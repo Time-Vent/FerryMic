@@ -20,10 +20,14 @@ use soundboard::{BoardCommand, SoundBoard};
 /// 启动音频线程：创建 SoundBoard + cpal 输出流。
 /// Start the audio thread: create SoundBoard + cpal output stream.
 ///
+/// `output_device`：可选输出设备名（模糊匹配）；`None` 用默认输出设备。
+/// `output_device`: optional output device name (fuzzy match); `None` uses default.
+///
 /// 返回输出流句柄（持有即播放，drop 即停止）。
 /// Returns the output stream handle (playing while held, stops on drop).
 pub fn spawn_audio_thread(
     cmd_rx: Receiver<BoardCommand>,
+    output_device: Option<&str>,
 ) -> anyhow::Result<Box<dyn OutputStreamHandle>> {
     let backend = CpalBackend::new();
 
@@ -40,7 +44,9 @@ pub fn spawn_audio_thread(
 
     let channels_usize = channels as usize;
 
-    let handle = backend.open_output(&config, move |data: &mut [f32]| {
+    // 回调：消费命令 + 混音 + 写出。
+    // Callback: consume commands + mix + write out.
+    let callback = move |data: &mut [f32]| {
         // 1. 有界消费命令（≤32 条）。1. Bounded command consumption (≤32).
         let mut n = 0;
         while n < 32 {
@@ -56,7 +62,12 @@ pub fn spawn_audio_thread(
         // 2. 混音所有实例到输出。2. Mix all instances into output.
         let frames_actual = data.len() / channels_usize;
         board.fill(data, frames_actual, channels_usize);
-    })?;
+    };
+
+    let handle = match output_device {
+        Some(name) => backend.open_output_named(&config, name, callback)?,
+        None => backend.open_output(&config, callback)?,
+    };
 
     Ok(handle)
 }

@@ -144,54 +144,7 @@ impl AudioBackend for CpalBackend {
             .or_else(|| self.host.output_devices().ok().and_then(|mut it| it.next()))
             .ok_or_else(|| PlatformError::DeviceNotFound("no output device".into()))?;
 
-        // 取一个兼容的支持配置。
-        // Pick a compatible supported config.
-        let supported = device
-            .supported_output_configs()
-            .map_err(|e| PlatformError::Backend(e.to_string()))?
-            .find(|c| {
-                c.channels() == config.channels.0
-                    && (c.min_sample_rate().0..=c.max_sample_rate().0)
-                        .contains(&config.sample_rate.0)
-            })
-            .or_else(|| {
-                device
-                    .supported_output_configs()
-                    .ok()
-                    .and_then(|mut it| it.next())
-            })
-            .ok_or_else(|| PlatformError::UnsupportedConfig {
-                device: device.name().unwrap_or_default(),
-                config: *config,
-            })?;
-
-        let actual_rate = pick_rate(
-            config.sample_rate.0,
-            supported.min_sample_rate().0,
-            supported.max_sample_rate().0,
-        );
-
-        let stream_config: cpal::StreamConfig = cpal::StreamConfig {
-            channels: config.channels.0,
-            sample_rate: cpal::SampleRate(actual_rate),
-            buffer_size: to_buffer_size(config.buffer_frames.0),
-        };
-
-        let mut callback = callback;
-        let stream = device
-            .build_output_stream(
-                &stream_config,
-                move |data: &mut [f32], _info| callback(data),
-                |err| log::error!("cpal output stream error: {err}"),
-                None,
-            )
-            .map_err(|e| PlatformError::Backend(e.to_string()))?;
-
-        stream.play().map_err(|e| PlatformError::Backend(e.to_string()))?;
-
-        Ok(Box::new(CpalOutputStreamHandle {
-            inner: Arc::new(Mutex::new(Some(stream))),
-        }))
+        self.build_output_on(device, config, callback)
     }
 
     fn open_input<F>(
@@ -252,6 +205,98 @@ impl AudioBackend for CpalBackend {
         stream.play().map_err(|e| PlatformError::Backend(e.to_string()))?;
 
         Ok(Box::new(CpalInputStreamHandle {
+            inner: Arc::new(Mutex::new(Some(stream))),
+        }))
+    }
+}
+
+impl CpalBackend {
+    /// 按设备名（模糊匹配）打开输出流。
+    /// Open an output stream by device name (fuzzy match).
+    ///
+    /// `device_name` 与设备名做「包含」匹配；用于让用户选择声卡或虚拟音频线。
+    /// `device_name` is matched by containment against device names; lets the user
+    /// pick a speaker or a virtual audio cable.
+    pub fn open_output_named<F>(
+        &self,
+        config: &StreamConfig,
+        device_name: &str,
+        callback: F,
+    ) -> Result<Box<dyn platform_api::OutputStreamHandle>, PlatformError>
+    where
+        F: FnMut(&mut [f32]) + Send + 'static,
+    {
+        let device = self
+            .host
+            .output_devices()
+            .map_err(|e| PlatformError::Backend(e.to_string()))?
+            .find(|d| {
+                d.name()
+                    .map(|n| n.to_lowercase().contains(&device_name.to_lowercase()))
+                    .unwrap_or(false)
+            })
+            .ok_or_else(|| PlatformError::DeviceNotFound(device_name.to_string()))?;
+
+        self.build_output_on(device, config, callback)
+    }
+
+    /// 在指定设备上构建输出流（内部核心逻辑，供 `open_output` / `open_output_named` 复用）。
+    /// Build an output stream on a given device (internal core, shared by
+    /// `open_output` / `open_output_named`).
+    fn build_output_on<F>(
+        &self,
+        device: cpal::Device,
+        config: &StreamConfig,
+        callback: F,
+    ) -> Result<Box<dyn platform_api::OutputStreamHandle>, PlatformError>
+    where
+        F: FnMut(&mut [f32]) + Send + 'static,
+    {
+        // 取一个兼容的支持配置。Pick a compatible supported config.
+        let supported = device
+            .supported_output_configs()
+            .map_err(|e| PlatformError::Backend(e.to_string()))?
+            .find(|c| {
+                c.channels() == config.channels.0
+                    && (c.min_sample_rate().0..=c.max_sample_rate().0)
+                        .contains(&config.sample_rate.0)
+            })
+            .or_else(|| {
+                device
+                    .supported_output_configs()
+                    .ok()
+                    .and_then(|mut it| it.next())
+            })
+            .ok_or_else(|| PlatformError::UnsupportedConfig {
+                device: device.name().unwrap_or_default(),
+                config: *config,
+            })?;
+
+        let actual_rate = pick_rate(
+            config.sample_rate.0,
+            supported.min_sample_rate().0,
+            supported.max_sample_rate().0,
+        );
+
+        let stream_config: cpal::StreamConfig = cpal::StreamConfig {
+            channels: config.channels.0,
+            sample_rate: cpal::SampleRate(actual_rate),
+            buffer_size: to_buffer_size(config.buffer_frames.0),
+        };
+
+        let mut callback = callback;
+        let stream = device
+            .build_output_stream(
+                &stream_config,
+                move |data: &mut [f32], _info| callback(data),
+                |err| log::error!("cpal output stream error: {err}"),
+                None,
+            )
+            .map_err(|e| PlatformError::Backend(e.to_string()))?;
+
+        stream.play().map_err(|e| PlatformError::Backend(e.to_string()))?;
+
+        Ok(Box::new(CpalOutputStreamHandle {
             inner: Arc::new(Mutex::new(Some(stream))),
         }))
     }

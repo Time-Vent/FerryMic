@@ -19,11 +19,13 @@ mod hotkeys;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
+use audio_cpal::CpalBackend;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use crossbeam_channel::{unbounded, Sender};
+use platform_api::AudioBackend;
 use serde::{Deserialize, Serialize};
 use soundboard::{BoardCommand, SoundId, SoundSpec, TriggerMode};
 use tower_http::services::ServeDir;
@@ -86,6 +88,33 @@ impl From<&SoundSpec> for SoundItem {
 /// 健康检查。Health check.
 async fn health() -> &'static str {
     "ok"
+}
+
+/// 输出设备信息（供 UI 选择）。Output device info (for UI selection).
+#[derive(Debug, Serialize)]
+struct OutputDevice {
+    name: String,
+    is_default: bool,
+}
+
+/// 列出可用输出设备（声卡 / 虚拟音频线）。List available output devices
+/// (speaker / virtual audio cable).
+async fn list_devices() -> Result<Json<Vec<OutputDevice>>, (StatusCode, String)> {
+    let backend = CpalBackend::new();
+    let devices = backend
+        .enumerate_devices()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let outs: Vec<OutputDevice> = devices
+        .iter()
+        .filter(|d| !d.supported_output.is_empty())
+        .map(|d| OutputDevice {
+            name: d.name.clone(),
+            is_default: d.is_default_output,
+        })
+        .collect();
+
+    Ok(Json(outs))
 }
 
 /// 列出所有音效。List all sounds.
@@ -216,6 +245,7 @@ async fn set_speed(
 fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(health))
+        .route("/devices", get(list_devices))
         .route("/sounds", get(list_sounds).post(add_sound))
         .route(
             "/sounds/:id",
@@ -241,9 +271,13 @@ async fn main() -> anyhow::Result<()> {
     // Command channel: web service → audio thread.
     let (cmd_tx, cmd_rx) = unbounded::<BoardCommand>();
 
+    // 可选输出设备（声卡 / 虚拟音频线），通过环境变量指定。
+    // Optional output device (speaker / virtual cable), set via env var.
+    let output_device = std::env::var("SOUNDBRIDGE_OUTPUT_DEVICE").ok();
+
     // 启动音频线程，句柄保持存活到进程结束。
     // Start audio thread; hold the handle until process exit.
-    let stream = audio::spawn_audio_thread(cmd_rx)?;
+    let stream = audio::spawn_audio_thread(cmd_rx, output_device.as_deref())?;
     let _audio = audio::AudioHandle::new(stream);
 
     // 热键通道：Web 服务 → 热键线程；热键触发 → 音频命令队列。
