@@ -10,7 +10,7 @@
 
 #![forbid(unsafe_code)]
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use audio_types::{DeviceId, DeviceInfo, StreamConfig};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -207,7 +207,7 @@ impl AudioBackend for CpalBackend {
             .map_err(|e| PlatformError::Backend(e.to_string()))?;
 
         Ok(Box::new(CpalInputStreamHandle {
-            inner: Arc::new(Mutex::new(Some(stream))),
+            inner: Mutex::new(Some(stream)),
         }))
     }
 }
@@ -301,14 +301,14 @@ impl CpalBackend {
             .map_err(|e| PlatformError::Backend(e.to_string()))?;
 
         Ok(Box::new(CpalOutputStreamHandle {
-            inner: Arc::new(Mutex::new(Some(stream))),
+            inner: Mutex::new(Some(stream)),
         }))
     }
 }
 
 /// 输出流句柄（drop 时停止流）。Output stream handle (stops on drop).
 pub struct CpalOutputStreamHandle {
-    inner: Arc<Mutex<Option<cpal::Stream>>>,
+    inner: Mutex<Option<cpal::Stream>>,
 }
 
 impl platform_api::OutputStreamHandle for CpalOutputStreamHandle {
@@ -339,7 +339,7 @@ impl platform_api::OutputStreamHandle for CpalOutputStreamHandle {
 
 /// 输入流句柄（drop 时停止流）。Input stream handle (stops on drop).
 pub struct CpalInputStreamHandle {
-    inner: Arc<Mutex<Option<cpal::Stream>>>,
+    inner: Mutex<Option<cpal::Stream>>,
 }
 
 impl platform_api::InputStreamHandle for CpalInputStreamHandle {

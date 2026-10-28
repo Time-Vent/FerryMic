@@ -3,12 +3,12 @@
 //! into a startable/stoppable application.
 //!
 //! 这一层负责「何时用哪个线程跑哪个执行器」的落地决策，但决策本身仍是逻辑性的：
-//! - 控制执行器：调用方（CLI/UI）所在线程。
-//! - 解码执行器：专用后台线程（文件解码 + 变速 + 预填充环）。
-//! - 实时回调：cpal 输出回调线程。
 //! This layer makes the "which thread runs which executor" decision concrete, yet
-//! still logically: control executor = caller's thread; decode executor = dedicated
-//! background thread; real-time callback = cpal output callback thread.
+//! still logically:
+//! - 控制执行器：调用方（CLI/UI）所在线程。Control executor: caller's thread (CLI/UI).
+//! - 解码执行器：专用后台线程（文件解码 + 变速 + 预填充环）。Decode executor:
+//!   dedicated background thread (file decode + varispeed + prefill ring).
+//! - 实时回调：cpal 输出回调线程。Real-time callback: cpal output callback thread.
 
 #![forbid(unsafe_code)]
 

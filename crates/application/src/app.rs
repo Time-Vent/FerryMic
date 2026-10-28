@@ -275,7 +275,7 @@ impl App {
 /// Rules: mono→multi duplicates; multi→mono averages; same count copies; otherwise
 /// take the first N channels.
 fn convert_channels(src: &[f32], src_ch: usize, dst: &mut [f32], dst_ch: usize) {
-    let frames = if src_ch == 0 { 0 } else { src.len() / src_ch };
+    let frames = src.len() / src_ch.max(1);
 
     if src_ch == dst_ch {
         dst[..src.len()].copy_from_slice(src);

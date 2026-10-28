@@ -69,9 +69,8 @@ impl FixedProcessor for Limiter {
     }
 
     fn set_param(&mut self, id: u32, value: f32) {
-        match id {
-            param::LIMITER_THRESHOLD_DB => self.set_threshold_db(value),
-            _ => {}
+        if id == param::LIMITER_THRESHOLD_DB {
+            self.set_threshold_db(value)
         }
     }
 

@@ -9,8 +9,6 @@
 //! - 本模块创建的流句柄由调用方持有（drop 即停止）。
 //!   The stream handle created here is held by the caller (dropped to stop).
 
-use std::sync::Arc;
-
 use audio_cpal::CpalBackend;
 use audio_types::StreamConfig;
 use crossbeam_channel::Receiver;
@@ -75,13 +73,11 @@ pub fn spawn_audio_thread(
 /// 音频线程句柄：持有流句柄，drop 即停止音频。
 /// Audio thread handle: holds the stream handle; drop stops audio.
 pub struct AudioHandle {
-    _stream: Arc<Box<dyn OutputStreamHandle>>,
+    _stream: Box<dyn OutputStreamHandle>,
 }
 
 impl AudioHandle {
     pub fn new(stream: Box<dyn OutputStreamHandle>) -> Self {
-        Self {
-            _stream: Arc::new(stream),
-        }
+        Self { _stream: stream }
     }
 }

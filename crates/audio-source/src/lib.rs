@@ -3,11 +3,11 @@
 //!
 //! 提供两类源：
 //! Two kinds of source:
-//! 1. [`VariableRateSource`] —— 变速源（文件解码 + varispeed 重采样）。
-//!    1. `VariableRateSource` — variable-rate source (file decode + varispeed resample).
-//! 2. [`InputSource`] —— 输入采集源（麦克风等），经 SPSC 环与异步重采样汇入混音。
-//!    2. `InputSource` — input capture source (mic etc.), fed via SPSC ring + async
-//!       resample into the mix.
+//! - [`VariableRateSource`] —— 变速源（文件解码 + varispeed 重采样）。
+//!   `VariableRateSource` — variable-rate source (file decode + varispeed resample).
+//! - [`InputSource`] —— 输入采集源（麦克风等），经 SPSC 环与异步重采样汇入混音。
+//!   `InputSource` — input capture source (mic etc.), fed via SPSC ring + async
+//!   resample into the mix.
 //!
 //! 变速属于「源」的职责，不属于 [`dsp::FixedProcessor`]；重采样改变帧数。
 //! Speed/pitch change belongs to the source, not `dsp::FixedProcessor`; resampling

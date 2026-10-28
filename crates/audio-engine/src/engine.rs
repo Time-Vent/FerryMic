@@ -147,14 +147,14 @@ impl Engine {
     /// 输入输出均为交错。`file`/`mic` 长度 = frames × channels。
     /// Both inputs and output are interleaved; `file`/`mic` length = frames × channels.
     pub fn mix(&self, file: &[f32], mic: &[f32], out: &mut [f32], frames: usize, channels: usize) {
-        let n = frames * channels;
-        for i in 0..n {
+        let _ = (frames, channels);
+        for (i, o) in out.iter_mut().enumerate() {
             let mut s = file.get(i).copied().unwrap_or(0.0) * self.file_gain_lin
                 + mic.get(i).copied().unwrap_or(0.0) * self.mic_gain_lin;
             // 软限幅：tanh 防削波，比硬 clip 更平滑。
             // Soft limiting: tanh avoids hard clipping and sounds smoother.
             s = s.tanh();
-            out[i] = s;
+            *o = s;
         }
     }
 

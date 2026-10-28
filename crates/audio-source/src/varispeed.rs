@@ -56,11 +56,7 @@ impl VarispeedSource {
 
     /// 源总帧数。Total source frames.
     pub fn total_frames(&self) -> usize {
-        if self.channels == 0 {
-            0
-        } else {
-            self.samples.len() / self.channels
-        }
+        self.samples.len() / self.channels.max(1)
     }
 
     /// 当前相位（采样索引）。Current phase.

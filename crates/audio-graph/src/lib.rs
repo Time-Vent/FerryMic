@@ -121,7 +121,7 @@ impl ProcessingGraph {
         for node in &mut self.nodes {
             match node {
                 Node::Processor(p) => {
-                    let (src, dst) = if idx % 2 == 0 {
+                    let (src, dst) = if idx.is_multiple_of(2) {
                         (self.scratch_a.as_mut_slice(), self.scratch_b.as_mut_slice())
                     } else {
                         (self.scratch_b.as_mut_slice(), self.scratch_a.as_mut_slice())
@@ -138,7 +138,7 @@ impl ProcessingGraph {
         // Node i's dst: even i → scratch_b, odd i → scratch_a.
         // 最后一个节点索引 = idx-1。
         // Last node index = idx-1.
-        let final_buf = if (idx.saturating_sub(1)) % 2 == 0 {
+        let final_buf = if (idx.saturating_sub(1)).is_multiple_of(2) {
             &self.scratch_b
         } else {
             &self.scratch_a

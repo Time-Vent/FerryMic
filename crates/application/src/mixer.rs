@@ -80,10 +80,10 @@ impl Mixer {
     pub fn mix(&self, file: &[f32], mic: &[f32], out: &mut [f32]) {
         let fg = self.file_gain_lin();
         let mg = self.mic_gain_lin();
-        for i in 0..out.len() {
+        for (i, o) in out.iter_mut().enumerate() {
             let s =
                 file.get(i).copied().unwrap_or(0.0) * fg + mic.get(i).copied().unwrap_or(0.0) * mg;
-            out[i] = s.tanh();
+            *o = s.tanh();
         }
     }
 }

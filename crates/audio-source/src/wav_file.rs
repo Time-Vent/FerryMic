@@ -39,11 +39,7 @@ impl DecodedAudio {
     /// 帧数。Frame count.
     #[inline]
     pub fn frames(&self) -> usize {
-        if self.channels == 0 {
-            0
-        } else {
-            self.samples.len() / self.channels
-        }
+        self.samples.len() / self.channels.max(1)
     }
 }
 
