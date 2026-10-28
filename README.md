@@ -11,20 +11,23 @@ apps hear both your voice and the effects.
 
 - ✅ **桌面 App**：独立窗口（Tauri + 系统 WebView），Windows 版约 9 MB，无需浏览器
 - ✅ **麦克风 + 音效混合**：自动识别硬件麦克风；音量、静音、电平表；运行中切换设备，断开自动重连
-- ✅ **发送目标可切换**：设置里选「发送给游戏」的虚拟音频线，不用重启；底部直接提示游戏里该选哪个麦克风
+- ✅ **输出音频线路可切换**：设置里选虚拟音频线，不用重启；底部直接提示其他软件里该选哪个麦克风
 - ✅ **试听**：音效同时在耳机 / 扬声器里播放，自己也能听到（不含自己的声音，可单独调音量）
 - ✅ **音效库 = 磁盘文件夹**：自选位置，子文件夹即分类（可多层）；在资源管理器里放进去的文件刷新后出现
 - ✅ **整理音效**：新建 / 重命名 / 删除文件夹，把卡片拖到文件夹即可移动；删除的文件进回收站
 - ✅ **卡片快捷控件**：循环 / 单次（双箭头图标）、独占 / 叠加（圆点 / 两个交叠的圆）、倍速都是点一下切换；音量点开竖向滑条
+- ✅ **新音效默认设置**：默认独占、单次、0 dB、1.0×，设置里可改，也可一键应用到所有现有音效
 - ✅ **进度条拖动**：播放中拖动卡片底部的进度条跳转
 - ✅ **全局快捷键**：按键录制设置，游戏全屏时也能触发
 - ✅ **外观**：深色 / 浅色 / 跟随系统，主题色 7 种预设 + 自定义；App 图标颜色可跟随主题色
+- ✅ **音效资源**：左侧地球按钮打开免费 / 开放音效网站合集（Freesound、Pixabay、Mixkit、BBC 等），可添加自己的网址；
+  App 里在预览窗口打开，下载的音频文件自动存进音效库的「下载」文件夹
 - ✅ **多语言**：简体中文 / English，设置里切换（默认跟随系统），界面、错误提示、托盘菜单一起切换
 - ✅ **托盘**：关闭窗口时询问「最小化到托盘」还是「退出」（可记住选择）
 - ✅ **防漏音 / 防反馈**：自动排除会形成反馈环的虚拟线和「立体声混音」这类回录设备
 - ✅ **Linux**：自动创建虚拟麦克风（PipeWire / PulseAudio），无需第三方软件
 - ✅ **设置内置说明**：基础操作 + 各平台接入游戏的步骤
-- ✅ **手机遥控**：左侧一键开关，扫二维码打开；带访问码，即开即关不用重启
+- ✅ **手机遥控**：左侧一键开关（右上角信号波亮起表示已开启），扫二维码打开；带访问码，即开即关不用重启
 - ✅ **浏览器版**：`soundbridge-server` 用浏览器访问，功能与 App 相同
 
 ## 快速开始
@@ -71,11 +74,14 @@ cargo run --release --bin soundbridge-server
    - 音量：点开竖向滑条；倍速：点一下切到下一档，右键回上一档；
    - 「⋯」打开完整编辑（名称、文件夹、快捷键、删除）。
 5. **麦克风**：底部麦克风条可静音、调音量、看电平；默认自动选硬件麦克风，也可在设置 →「音频链路」里指定。
-6. **接入游戏**：设置 →「音频链路」→「发送给游戏」选虚拟音频线（如 `CABLE Input`），
-   底部会显示「游戏麦克风选：CABLE Output」——在游戏 / 语音软件里选它即可。
-   输出到扬声器时底部会变成黄色警告（游戏收不到）。
+6. **接入其他软件**：设置 →「音频链路」→「输出音频线路」选虚拟音频线（如 `CABLE Input`），
+   底部会显示「其他软件的麦克风选：CABLE Output」——在要用的软件里把麦克风选成它即可。
+   输出到扬声器时底部会变成黄色警告（其他软件收不到）。
 7. **试听**：底部耳机按钮开关试听，音效同时在耳机里播放；设备和音量在设置里调。
 8. **手机遥控**：点左侧手机图标，开启后用手机扫二维码。
+9. **找音效**：点左侧地球图标打开「音效资源」，「预览」在 App 窗口里打开网站试听；
+   在那个窗口里点网站的下载按钮，音频文件会直接存进音效库的「下载」文件夹（其它文件照常进系统下载目录）。
+   列表里的授权说明只是概括，以各网站为准。
 
 **麦克风来源说明**：
 
@@ -95,9 +101,9 @@ cargo run --release --bin soundbridge-server
 
 | 平台 | 虚拟麦克风 | 游戏里选择的麦克风 |
 |---|---|---|
-| Windows | 安装 VB-Cable 等虚拟音频线；设置里「发送给游戏」选 `CABLE Input` | `CABLE Output` |
+| Windows | 安装 VB-Cable 等虚拟音频线；设置里「输出音频线路」选 `CABLE Input` | `CABLE Output` |
 | Linux | SoundBridge 启动时**自动创建**（需 `pactl`，PipeWire / PulseAudio 均可），退出时移除 | `SoundBridge-Microphone` |
-| macOS | 安装 BlackHole；设置里「发送给游戏」选 `BlackHole 2ch` | `BlackHole 2ch` |
+| macOS | 安装 BlackHole；设置里「输出音频线路」选 `BlackHole 2ch` | `BlackHole 2ch` |
 
 - Windows：「声音设置」里的默认播放设备保持为耳机或扬声器，不要设成 `CABLE Input`，否则游戏声音也会进麦克风。
 - Linux：全局快捷键需要 X11 会话；Wayland 下请改用 X11 会话，或用界面 / 手机遥控触发。
@@ -126,7 +132,7 @@ cargo run --release --bin soundbridge-server
 | Linux | `$XDG_DATA_HOME/SoundBridge/`（默认 `~/.local/share/SoundBridge/`） |
 | macOS | `~/Library/Application Support/SoundBridge/` |
 
-`settings.json` 保存麦克风与输出设备、试听、手机遥控（开关与访问码）、外观、语言、关闭窗口行为、音效库位置。旧版的 `library.json`
+`settings.json` 保存麦克风与输出设备、试听、手机遥控（开关与访问码）、外观、语言、关闭窗口行为、音效库位置、新音效默认设置、自己添加的音效网站。旧版的 `library.json`
 会在首次启动时自动迁移进音效库文件夹（原文件改名为 `library.v1.json.bak`）。
 
 ### 环境变量（App 与浏览器版通用）
@@ -181,12 +187,13 @@ apps/app（桌面 App，Tauri）              apps/server（浏览器版入口�
 |---|---|---|
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/app` | 版本、平台、数据目录、音效库位置、输出设备、外观、手机遥控、窗口选项、虚拟麦克风状态 |
-| POST | `/api/settings` | 修改设置 `{theme_mode?, accent?, auto_virtual_mic?, tint_app_icon?, close_action?, language?}`（`language`：`system` / `zh-CN` / `en`） |
+| POST | `/api/settings` | 修改设置 `{theme_mode?, accent?, auto_virtual_mic?, tint_app_icon?, close_action?, language?, sound_defaults?}`（`language`：`system` / `zh-CN` / `en`；`sound_defaults`：`{looping, exclusive, gain_db, speed}`；`custom_sites`：`[{name, url}]`） |
 | POST | `/api/window` | 回答关闭询问 `{action: "tray" \| "quit" \| "cancel", remember}`（桌面 App） |
+| POST | `/api/open-url` | 打开网址 `{url, title?, external}`：App 里默认在预览窗口打开，`external` 用系统浏览器；只允许 http(s) |
 | POST | `/api/pick-folder` | 在电脑上弹出「选择文件夹」对话框，返回 `{path}` |
 | GET | `/api/live` | 实时状态：`{playing: [{id, progress}], mic_level, mic_connected, close_prompt}` |
 | GET | `/api/devices` | 设备列表：输出带 `kind`（virtual / speaker）与 `game_mic`，输入带 `virtual` |
-| POST | `/api/output` | 运行中切换「发送给游戏」的输出 `{device: "名称" \| null}`，失败恢复原设备 |
+| POST | `/api/output` | 运行中切换输出音频线路 `{device: "名称" \| null}`，失败恢复原设备 |
 | GET / POST | `/api/monitor` | 试听状态 / 设置 `{enabled?, device?, gain_db?}` |
 | GET / POST | `/api/remote` | 手机遥控状态 / 开关 `{enabled?, regenerate?}`，即时生效 |
 | GET | `/api/remote/qr.svg` | 手机遥控网址的二维码 |

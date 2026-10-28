@@ -513,6 +513,8 @@ loop {
 - 窗口参数：1080×700、最小 760×520、背景色与界面一致（防白屏闪烁）、关闭 Tauri 拖放拦截。
 - `build_tray`：托盘图标 + 菜单（打开 / 退出，按界面语言；`on_settings` 时 `apply_tray_menu` 重建），左键单击 `show_main`。
 - `on_window_event(CloseRequested)`：按设置 `close_action` 隐藏 / 退出 / 询问（`Control::request_close`）。
+- `open_browse_window(url, title)`：音效资源预览窗口（复用已有的就 `navigate`）；`on_download` 里
+  `is_audio_file` 判断是音频就改保存位置到音效库「下载」文件夹，`unique_path` 避免覆盖。
 - `tinted_icon(accent)`：内置 `icons/icon.png` 逐像素转 HSL，色相旋转「主题色色相 − 246.1°」，
   饱和度很低的像素（白色图案）不动；钩子在后台线程触发，图标在主线程（`run_on_main_thread`）设置。
 - `#![windows_subsystem = "windows"]`：发布版不弹控制台。

@@ -24,12 +24,14 @@ use soundboard::{BoardCommand, LoadedSound, PlayMode, SoundId};
 
 use crate::audio::{describe_output, AudioInfo, OutputKind, OutputRequest, PlayingSet};
 use crate::hotkeys::HotkeyCommand;
-use crate::library::{Entry, Library, ScanDiff};
+use crate::library::{Entry, Library, ScanDiff, SoundDefaults};
 use crate::loader::Player;
 use crate::mic::{self, MicControl, MicRequest};
 use crate::monitor::{MonitorControl, MonitorRequest, MonitorStatus};
 use crate::remote::{qr_svg, RemoteServer, RemoteStatus};
-use crate::settings::{is_hex_color, CloseAction, SettingsStore, ThemeMode};
+use crate::settings::{
+    is_hex_color, is_web_url, CloseAction, CustomSite, SettingsStore, ThemeMode, MAX_CUSTOM_SITES,
+};
 use crate::virtual_mic::VirtualMicInfo;
 use crate::{Hooks, WindowAction};
 
@@ -190,6 +192,7 @@ pub fn router(state: AppState) -> Router {
         .route("/settings", post(set_settings))
         .route("/window", post(window_action))
         .route("/pick-folder", post(pick_folder))
+        .route("/open-url", post(open_url))
         .route("/live", get(get_live))
         .route("/devices", get(list_devices))
         .route("/output", post(select_output))
@@ -250,6 +253,10 @@ struct AppInfo {
     language: String,
     /// 实际使用的语言（`zh-CN` / `en`）。The language actually in use.
     language_effective: &'static str,
+    /// 新音效的初始设置。Initial settings for new sounds.
+    sound_defaults: SoundDefaults,
+    /// 用户添加的音效网站。User-added sound sites.
+    custom_sites: Vec<CustomSite>,
     auto_virtual_mic: bool,
     /// Linux 虚拟麦克风状态。Linux virtual mic status.
     virtual_mic: Option<VirtualMicInfo>,
@@ -273,6 +280,8 @@ fn app_info(state: &AppState) -> AppInfo {
         close_action: s.close_action,
         language: s.language,
         language_effective: crate::i18n::current(),
+        sound_defaults: s.sound_defaults,
+        custom_sites: s.custom_sites,
         virtual_mic: state.virtual_mic.clone(),
     }
 }
@@ -290,6 +299,8 @@ struct SettingsRequest {
     tint_app_icon: Option<bool>,
     close_action: Option<CloseAction>,
     language: Option<String>,
+    sound_defaults: Option<SoundDefaults>,
+    custom_sites: Option<Vec<CustomSite>>,
 }
 
 async fn set_settings(
@@ -313,7 +324,46 @@ async fn set_settings(
         }
         crate::i18n::apply(l);
     }
+    if let Some(sites) = &req.custom_sites {
+        if sites.len() > MAX_CUSTOM_SITES {
+            return Err(bad_request(trf!(
+                "最多添加 {MAX_CUSTOM_SITES} 个网站",
+                "At most {MAX_CUSTOM_SITES} sites"
+            )));
+        }
+        for site in sites {
+            if site.name.trim().is_empty() || site.name.chars().count() > 60 {
+                return Err(bad_request(tr!(
+                    "网站名称不能为空，最多 60 个字",
+                    "Site name must be 1–60 characters"
+                )));
+            }
+            if !is_web_url(&site.url) {
+                return Err(bad_request(trf!(
+                    "网址需以 http:// 或 https:// 开头：{}",
+                    "The address must start with http:// or https://: {}",
+                    site.url
+                )));
+            }
+        }
+    }
+    let sound_defaults = req.sound_defaults.map(SoundDefaults::clamped);
+    if let Some(d) = sound_defaults {
+        state.library.set_defaults(d);
+    }
     state.settings.update(|s| {
+        if let Some(v) = sound_defaults {
+            s.sound_defaults = v;
+        }
+        if let Some(v) = req.custom_sites {
+            s.custom_sites = v
+                .into_iter()
+                .map(|c| CustomSite {
+                    name: c.name.trim().to_string(),
+                    url: c.url.trim().to_string(),
+                })
+                .collect();
+        }
         if let Some(v) = req.language {
             s.language = v;
         }
@@ -865,6 +915,51 @@ async fn open_library(State(state): State<AppState>) -> ApiResult<StatusCode> {
         .spawn()
         .map_err(|e| internal(trf!("无法打开文件夹：{e}", "Can't open the folder: {e}")))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// 打开网址：`external` 用系统浏览器，否则在 App 的预览窗口里打开（浏览器版总是用系统浏览器）。
+/// Open a URL: `external` uses the system browser, otherwise the app's preview window
+/// (the browser version always uses the system browser).
+#[derive(Debug, Deserialize)]
+struct OpenUrlRequest {
+    url: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    external: bool,
+}
+
+async fn open_url(
+    State(state): State<AppState>,
+    Json(req): Json<OpenUrlRequest>,
+) -> ApiResult<StatusCode> {
+    if !is_web_url(&req.url) {
+        return Err(bad_request(tr!(
+            "只能打开 http:// 或 https:// 网址",
+            "Only http:// or https:// addresses can be opened"
+        )));
+    }
+    match (&state.hooks.on_open_url, req.external) {
+        (Some(hook), false) => hook(req.url, req.title),
+        _ => open_in_browser(&req.url)
+            .map_err(|e| internal(trf!("无法打开浏览器：{e}", "Can't open the browser: {e}")))?,
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 用系统默认浏览器打开（网址已校验为 http(s)）。Open in the default browser (URL already
+/// validated as http(s)).
+fn open_in_browser(url: &str) -> std::io::Result<()> {
+    let mut cmd = if cfg!(windows) {
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else {
+        std::process::Command::new("xdg-open")
+    };
+    cmd.arg(url).spawn().map(|_| ())
 }
 
 #[derive(Debug, Deserialize)]

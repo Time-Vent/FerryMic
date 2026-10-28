@@ -21,10 +21,12 @@
     <div class="app">
       <nav class="rail" aria-label="导航">
         <div class="brand" data-icon="logo" title="SoundBridge"></div>
-        <button class="rail-btn active" data-icon="grid" title="音效库" aria-label="音效库"></button>
+        <button class="rail-btn active" id="view-library" data-icon="grid" title="音效库" aria-label="音效库"></button>
+        <!-- 音效资源：收集免费 / 开放的音效网站。Sound sites: free / open sound websites. -->
+        <button class="rail-btn" id="view-sites" data-icon="globe" title="音效资源" aria-label="音效资源"><svg class="note-badge" viewBox="0 0 12 12" aria-hidden="true"><ellipse cx="3.6" cy="9.4" rx="2.1" ry="1.7" /><path d="M5.6 9.2V1.6c0.4 1.8 3.9 2.3 3.9 5" /></svg></button>
         <div class="rail-spacer"></div>
         <!-- 手机遥控开关（点击打开二维码面板）。Phone remote (opens the QR panel). -->
-        <button class="rail-btn remote-btn" id="remote-btn" data-icon="phone" title="手机遥控" aria-label="手机遥控"><i class="dot"></i></button>
+        <button class="rail-btn remote-btn" id="remote-btn" data-icon="phone" title="手机遥控" aria-label="手机遥控"><svg class="waves" viewBox="0 0 12 12" aria-hidden="true"><circle cx="2.2" cy="9.8" r="1.1" /><path d="M2.2 5.8a4 4 0 0 1 4 4" /><path d="M2.2 1.8a8 8 0 0 1 8 8" /></svg></button>
         <button class="rail-btn" id="open-help" data-icon="help" title="使用说明" aria-label="使用说明"></button>
         <button class="rail-btn" id="open-settings" data-icon="settings" title="设置" aria-label="设置"></button>
       </nav>
@@ -71,6 +73,26 @@
 
         <section id="grid" class="grid" aria-live="polite"></section>
 
+        <!-- 音效资源页（切换到它时隐藏文件夹栏与音效网格）。
+             Sound sites view (hides the folder bar and the sound grid when shown). -->
+        <section id="sites-view" class="sites-view">
+          <header class="toolbar">
+            <div class="title">
+              <h1>音效资源</h1>
+              <span id="sites-count" class="count"></span>
+            </div>
+            <div class="toolbar-actions">
+              <button id="add-site" class="btn primary">
+                <span data-icon="plus"></span><span class="btn-label">添加网址</span>
+              </button>
+            </div>
+          </header>
+          <p class="sites-intro hint">
+            <span class="app-only">点「预览」在 App 窗口里打开网站并试听；在预览窗口里下载的音频文件会自动存进音效库的「下载」文件夹。</span>
+          </p>
+          <div id="sites-grid" class="sites-grid"></div>
+        </section>
+
         <!-- 底部麦克风条。Bottom mic bar. -->
         <footer class="mixer">
           <button id="mic-mute" class="mic-toggle" aria-label="麦克风静音"></button>
@@ -88,11 +110,11 @@
           </label>
           <!-- 试听开关：音效同时在耳机里播放。Monitor switch: also hear the effects. -->
           <button id="monitor-btn" class="mixer-btn" data-icon="headphones" title="试听：音效同时在耳机 / 扬声器里播放"></button>
-          <!-- 发送目标：游戏里该选哪个麦克风。Send target: which mic to pick in games. -->
+          <!-- 输出目标：其他软件里该选哪个麦克风。Output target: which mic to pick in other apps. -->
           <button id="send-target" class="send-target" title="混音发送到哪里（点击修改）">
             <span class="send-icon"></span>
             <span class="send-text">
-              <small id="send-label">游戏麦克风选</small>
+              <small id="send-label">其他软件的麦克风选</small>
               <b id="send-name">—</b>
             </span>
           </button>
@@ -156,7 +178,7 @@
               <button type="button" id="hotkey-rec" class="hotkey-rec"></button>
               <button type="button" id="hotkey-clear" class="btn ghost small">清除</button>
             </div>
-            <small class="hint">点击后按下组合键（游戏全屏时也能触发），Esc 取消</small>
+            <small class="hint">点击后按下组合键（其他程序全屏时也能触发），Esc 取消</small>
           </div>
           <p id="edit-file" class="file-line"></p>
         </div>
@@ -242,8 +264,33 @@
           <small class="hint">音效库就是这个文件夹：子文件夹即分类，在资源管理器里放进去的音频文件，点左侧「刷新」后出现。</small>
         </section>
 
-        <!-- 音频链路：你的麦克风 → 混音 → 发送给游戏；另一路试听给自己。
-             Audio chain: your mic → mix → sent to games; plus a monitor for yourself. -->
+        <!-- 新音效的默认设置。Defaults for new sounds. -->
+        <section class="setting-group" id="defaults-section">
+          <h3><span data-icon="grid"></span>新音效的默认设置</h3>
+          <label class="switch-row">
+            <span>循环播放<small class="hint inline">关闭则每次播一遍</small></span>
+            <input id="def-looping" type="checkbox" class="switch" />
+          </label>
+          <label class="switch-row">
+            <span>独占<small class="hint inline">播放时打断其它音效；关闭则可叠加</small></span>
+            <input id="def-exclusive" type="checkbox" class="switch" />
+          </label>
+          <label class="field">
+            <span>音量 <output id="def-gain-out" class="value"></output></span>
+            <input id="def-gain" type="range" min="-30" max="12" step="1" value="0" />
+          </label>
+          <label class="field">
+            <span>倍速 <output id="def-speed-out" class="value"></output></span>
+            <input id="def-speed" type="range" min="0.5" max="2" step="0.05" value="1" />
+          </label>
+          <div class="setting-row end">
+            <button type="button" id="def-apply-all" class="btn ghost small">应用到所有现有音效</button>
+          </div>
+          <small class="hint">导入或放进音效库文件夹的新音效会使用这些设置；已有音效不会自动改变。</small>
+        </section>
+
+        <!-- 音频链路：你的麦克风 → 混音 → 输出音频线路（其他软件）；另一路试听给自己。
+             Audio chain: your mic → mix → output line (other apps); plus a monitor for yourself. -->
         <section class="setting-group" id="audio-section">
           <h3><span data-icon="send"></span>音频链路</h3>
           <div class="chain">
@@ -253,7 +300,7 @@
             <span class="chain-arrow">→</span>
             <div class="chain-node"><span data-icon="send"></span><small>虚拟麦克风</small></div>
             <span class="chain-arrow">→</span>
-            <div class="chain-node"><span data-icon="grid"></span><small>游戏 / 语音</small></div>
+            <div class="chain-node"><span data-icon="grid"></span><small>其他软件</small></div>
           </div>
 
           <div class="field">
@@ -266,8 +313,8 @@
           </div>
 
           <div class="field">
-            <span>发送给游戏（输出）</span>
-            <select id="output-select" aria-label="发送给游戏"></select>
+            <span>输出音频线路</span>
+            <select id="output-select" aria-label="输出音频线路"></select>
             <div id="game-mic-hint" class="callout"></div>
           </div>
 
@@ -317,24 +364,25 @@
               <li><b>导入</b>：把音频文件拖进窗口（或直接拖到左侧某个文件夹上），或点右上角「导入音效」。文件会保存进音效库文件夹。</li>
               <li><b>播放</b>：点卡片即可播放；播放中拖动卡片底部的进度条可跳转，鼠标移到圆形按钮上点击可停止；右上角「全部停止」。</li>
               <li><b>卡片按钮</b>：循环图标切换循环 / 单次（循环时再按一下卡片停止）；独占图标（一个圆点）/ 叠加图标（两个交叠的圆）切换播放时是否打断其它音效；音量点一下弹出竖向滑条；倍速点一下换一档（右键反向）。</li>
-              <li><b>快捷键</b>：点卡片右上角「⋯」打开编辑，点快捷键框后直接按组合键；游戏全屏时也能触发。</li>
+              <li><b>快捷键</b>：点卡片右上角「⋯」打开编辑，点快捷键框后直接按组合键；其他程序全屏时也能触发。</li>
               <li><b>文件夹</b>：左侧新建、重命名文件夹；把卡片拖到文件夹上即可移动。在资源管理器里改了文件后点左侧「刷新」。</li>
               <li><b>你的麦克风</b>：底部左侧可静音、调音量、看电平；本页「音频链路」里选择设备（默认自动选硬件麦克风）。</li>
-              <li><b>发送给游戏</b>：底部右侧显示游戏里该选哪个麦克风；本页「音频链路」里选择虚拟音频线。</li>
-              <li><b>试听</b>：混音发给游戏后自己听不到，打开底部的耳机按钮，音效会同时在耳机里播放（不含你自己的声音）。</li>
+              <li><b>输出音频线路</b>：底部右侧显示其他软件里该选哪个麦克风；本页「音频链路」里选择虚拟音频线。</li>
+              <li><b>试听</b>：混音输出到虚拟音频线后自己听不到，打开底部的耳机按钮，音效会同时在耳机里播放（不含你自己的声音）。</li>
               <li><b>手机遥控</b>：左侧手机按钮一键开关，手机扫二维码即可打开同一界面。</li>
+              <li><b>音效资源</b>：左侧地球按钮收集了免费 / 开放的音效网站，也可以添加自己的网址；App 里点「预览」在窗口中打开，在那里下载的音频会自动存进音效库的「下载」文件夹。</li>
             </ul>
           </details>
           <details id="help-platforms">
-            <summary>各平台接入游戏 / 语音软件</summary>
+            <summary>各平台接入其他软件</summary>
             <div class="platform" data-platform="windows">
               <h4>Windows <span class="badge-current">当前系统</span></h4>
               <ol class="help-list" data-i18n-html="help-windows">
                 <li>安装虚拟音频线，如 VB-Cable（免费）。</li>
-                <li>本页「音频链路 → 发送给游戏」选 <code>CABLE Input</code>。</li>
-                <li>游戏 / Discord / 会议软件的麦克风选 <code>CABLE Output</code>（底部右侧会提示）。</li>
+                <li>本页「音频链路 → 输出音频线路」选 <code>CABLE Input</code>。</li>
+                <li>其他软件的麦克风选 <code>CABLE Output</code>（底部右侧会提示）。</li>
                 <li>打开「试听」就能在耳机里听到自己放的音效。</li>
-                <li>Windows「声音设置」里默认播放设备保持为耳机或扬声器，不要设成 CABLE Input，否则游戏声音也会进麦克风。</li>
+                <li>Windows「声音设置」里默认播放设备保持为耳机或扬声器，不要设成 CABLE Input，否则电脑播放的所有声音都会进麦克风。</li>
               </ol>
             </div>
             <div class="platform" data-platform="linux">
@@ -342,7 +390,7 @@
               <ol class="help-list" data-i18n-html="help-linux">
                 <li>需要 PipeWire（含 pipewire-pulse）或 PulseAudio，以及 <code>pactl</code> 命令（pulseaudio-utils）。</li>
                 <li>SoundBridge 启动时自动创建虚拟麦克风 <code>SoundBridge-Microphone</code>，退出时自动移除。</li>
-                <li>游戏 / Discord 的麦克风选 <code>SoundBridge-Microphone</code>。</li>
+                <li>其他软件的麦克风选 <code>SoundBridge-Microphone</code>。</li>
                 <li>全局快捷键需要 X11 会话（Wayland 下请改用 X11 会话，或用界面 / 手机遥控触发）。</li>
               </ol>
             </div>
@@ -350,8 +398,8 @@
               <h4>macOS <span class="badge-current">当前系统</span></h4>
               <ol class="help-list" data-i18n-html="help-macos">
                 <li>安装虚拟音频设备，如 BlackHole 2ch。</li>
-                <li>本页「音频链路 → 发送给游戏」选 <code>BlackHole 2ch</code>。</li>
-                <li>游戏 / 语音软件的麦克风选 <code>BlackHole 2ch</code>。首次使用需在「隐私与安全性」中允许麦克风权限。</li>
+                <li>本页「音频链路 → 输出音频线路」选 <code>BlackHole 2ch</code>。</li>
+                <li>其他软件的麦克风选 <code>BlackHole 2ch</code>。首次使用需在「隐私与安全性」中允许麦克风权限。</li>
               </ol>
             </div>
           </details>

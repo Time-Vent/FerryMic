@@ -155,7 +155,9 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
   - 外观：`theme_mode`（system / dark / light）、`accent`（`#rrggbb`）、`tint_app_icon`（默认开）、
     `language`（`system` / `zh-CN` / `en`，默认 `system`）；
   - 窗口：`close_action`（`Ask` / `Tray` / `Quit`，默认 `Ask`）；
-  - 其它：`library_dir`（`null` = 数据目录下的 `sounds/`）、`auto_virtual_mic`（Linux）。
+  - 其它：`library_dir`（`null` = 数据目录下的 `sounds/`）、`auto_virtual_mic`（Linux）；
+  - 新音效默认设置：`sound_defaults`（`{looping, exclusive, gain_db, speed}`，默认独占、单次、0 dB、1.0×）；
+  - 音效资源：`custom_sites`（用户添加的网站 `[{name, url}]`）。
   旧文件缺少的字段自动取默认值。
 - 启动时麦克风选择优先级：环境变量 `SOUNDBRIDGE_INPUT_DEVICE` > 上次的选择 > 自动。
   输出：`SOUNDBRIDGE_OUTPUT_DEVICE` > 上次的选择 > 系统默认。
@@ -173,6 +175,9 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
   在资源管理器里改名 / 移动则视为删除 + 新增，设置会丢失。
 - **扫描**（启动、`POST /api/library/rescan`、窗口重新获得焦点时）：同步条目与设置，返回新增 / 删除的 id，
   由 API 层据此卸载 / 预加载音效、解绑 / 绑定快捷键。
+- **新音效的初始设置**：扫描时第一次见到的文件按 `SoundDefaults`（来自设置 `sound_defaults`，修改后经
+  `Library::set_defaults` 立即生效）建设置；已有音效不受影响。设置里「应用到所有现有音效」由界面逐个 PATCH 完成，
+  快捷键、名称、文件夹不变。
 - **id**：记在设置文件里，重启后不变（快捷键靠它）；新文件分配新 id，`next_id` 只增不减；
   手改设置文件造成重复 id 时自动重新分配。
 - **文件夹操作**：新建、重命名 / 移动（不能移进自己的子文件夹）、删除（只允许删除不含音效的文件夹）。
@@ -228,7 +233,9 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
 - **图标着色**：主题色变化时（`on_settings` 钩子），把内置图标 `icons/icon.png` 的像素按
   「主题色色相 − 原图色相 246.1°」旋转色相，跳过低饱和度（白色）像素，设为窗口与托盘图标。
   设置 `tint_app_icon` 关闭时恢复原图标。
-- **钩子**：服务库不依赖 Tauri，外壳通过 `ServerConfig.hooks`（`on_settings`、`on_window_action`）接收事件。
+- **钩子**：服务库不依赖 Tauri，外壳通过 `ServerConfig.hooks`（`on_settings`、`on_window_action`、`on_open_url`）接收事件。
+- **音效资源预览窗口**：`open_browse_window` 打开或复用 `browse` 窗口；`on_download` 把音频下载改存到音效库「下载」文件夹；
+  图标着色对所有窗口生效。
 - **前端内嵌**：服务库用 `rust-embed` 把 `apps/web/dist` 编进可执行文件，App 不依赖工作目录；
   `index.html` 设为 `no-cache`，升级后不会看到旧界面。
 
@@ -301,22 +308,34 @@ SoundBridge 输出 ──▶ 虚拟输出 soundbridge_mix（module-null-sink，�
 ## 12. 界面（`apps/web`）
 
 - 无框架的 TypeScript：`api.ts`（类型 + 请求）、`icons.ts`（自绘 SVG 图标）、`main.ts`（界面逻辑）。
-- **布局**：左侧细导航栏（手机遥控开关、使用说明、设置）、文件夹栏（文件夹树 + 新建 / 刷新 + 音效库位置）、
+- **布局**：左侧细导航栏（手机遥控开关——右上角信号波亮起表示已开启、使用说明、设置）、文件夹栏（文件夹树 + 新建 / 刷新 + 音效库位置）、
   中间音效卡片网格（搜索 / 全部停止 / 导入）、底部常驻条：你的麦克风（静音 / 电平 / 音量）、
-  试听按钮（耳机）、发送目标（「游戏麦克风选：CABLE Output」，点击打开设置的「音频链路」）。
+  试听按钮（耳机）、输出目标（「其他软件的麦克风选：CABLE Output」，点击打开设置的「音频链路」）。
+- **措辞**：界面不点名具体软件（游戏、Discord 等），统一说「输出音频线路」「其他软件」。
   窄屏（≤720 px，手机遥控）时隐藏两侧栏，文件夹变成顶部横向标签，设置按钮移到工具栏。
 - **文件夹**：选中文件夹显示其中（含子文件夹）的音效；「⋯」菜单新建子文件夹 / 重命名 / 删除；
   卡片可拖到文件夹上移动；从系统拖入文件时，放在某个文件夹上就导入到那里，否则导入到当前文件夹。
 - **卡片**：上半部分为播放按钮、名称、时长 / 快捷键 / 所在文件夹（单行）；中间是进度条
   （始终占位、只在播放时显示，保证卡片等高，按住拖动跳转）；底部是快捷控件：
   - 循环 / 单次：音乐播放器式的双箭头图标，点一下切换；
-  - 独占 / 叠加：同样的图标按钮（圆点 / 两个交叠的圆），点一下切换；开启的一方（循环、独占）高亮；
+  - 独占 / 叠加：同样的图标按钮（圆点 / 两个交叠的圆），点一下切换；
+  - 这两组开关没有「更好」的一方，所以透明无边框、两种状态同色，只换图标；
   - 音量：点开竖向滑条（停手后保存）；
   - 倍速：纯文字，点一下切到下一档预设，右键回上一档。
   「⋯」打开完整编辑（名称即文件名、文件夹、循环、独占、音量、倍速、快捷键、删除）。
-- **设置**：外观（含「App 图标跟随主题色」）、音效库位置、音频链路（链路示意图、你的麦克风、
-  发送给游戏、试听、Linux 虚拟麦克风）、窗口（关闭按钮行为）、使用说明。
+- **设置**：外观（含「App 图标跟随主题色」、语言）、音效库位置、新音效的默认设置、音频链路（链路示意图、你的麦克风、
+  输出音频线路、试听、Linux 虚拟麦克风）、窗口（关闭按钮行为）、使用说明。
   只在桌面 App 里有意义的项（图标、窗口）带 `.app-only`，浏览器 / 手机里隐藏（`/api/app` 的 `is_app`）。
+- **音效资源**（`sites.ts`）：左侧地球按钮切换到「音效资源」页（隐藏文件夹栏与音效网格，底部条保留）。
+  - 内置网站列表在前端（名称、网址、一句话介绍、授权概括，介绍与授权经 `t()` 翻译）；用户添加的存服务端设置 `custom_sites`
+    （最多 50 个，名称 1–60 字，网址必须是 http(s)），添加时先问网址（没写协议补 `https://`）再问名称（默认取主机名）。
+  - 打开：桌面 App 调 `POST /api/open-url` → `on_open_url` 钩子 → 外壳打开（或复用）标签为 `browse` 的预览窗口；
+    `external` 时用系统浏览器（Windows `rundll32 url.dll,FileProtocolHandler`）。浏览器版 / 手机直接开新标签页。
+    `/api/open-url` 属于电脑端专属接口，手机不能让电脑开窗口。
+  - **下载直接入库**：预览窗口的 `on_download` 钩子检查文件名，是音频格式就把保存位置改到音效库的「下载」
+    （英文界面为 `Downloads`）文件夹，重名自动加「 (2)」；其它文件照常进系统下载目录。回到主窗口时自动重新扫描，新文件出现在列表里。
+    这样不用为每个网站写解析逻辑，网站自己的下载按钮就是「一键入库」。
+  - 预览窗口加载的是第三方网页：不开放任何 Tauri 权限，与主界面一样只用 HTTP。
 - **多语言**（`i18n.ts`）：中文是源语言，英文按中文原文查表（`t('中文 {参数}', {参数})`）。
   - HTML 静态文字（文本节点与 `title` / `placeholder` / `aria-label` / `alt`）由 `translateDom` 整段替换，
     原文记在 `WeakMap` 里，切回中文时恢复；含排版的说明块用 `data-i18n-html="键"` 整块替换。
@@ -343,9 +362,10 @@ SoundBridge 输出 ──▶ 虚拟输出 soundbridge_mix（module-null-sink，�
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/app` | 版本、平台、数据目录、音效库位置、输出设备、端口、外观、手机遥控、`is_app`、`tint_app_icon`、`close_action`、`language` / `language_effective`、虚拟麦克风状态 |
-| POST | `/api/settings` | 修改设置 `{theme_mode?, accent?, auto_virtual_mic?, tint_app_icon?, close_action?, language?}`（改后调用 `on_settings` 钩子） |
+| GET | `/api/app` | 版本、平台、数据目录、音效库位置、输出设备、端口、外观、手机遥控、`is_app`、`tint_app_icon`、`close_action`、`language` / `language_effective`、`sound_defaults`、`custom_sites`、虚拟麦克风状态 |
+| POST | `/api/settings` | 修改设置 `{theme_mode?, accent?, auto_virtual_mic?, tint_app_icon?, close_action?, language?, sound_defaults?}`（改后调用 `on_settings` 钩子） |
 | POST | `/api/window` | 回答关闭询问 `{action: "tray" \| "quit" \| "cancel", remember}` |
+| POST | `/api/open-url` | 打开网址 `{url, title?, external}`；只允许 http(s)；App 里默认用预览窗口 |
 | POST | `/api/pick-folder` | 在电脑上弹出系统「选择文件夹」对话框（`rfd`），返回 `{path}` |
 | GET | `/api/live` | `{playing: [{id, progress}], mic_level, mic_connected, close_prompt}` |
 | GET | `/api/devices` | `{outputs: [{name, is_default, kind, game_mic}], inputs: [{name, is_default, virtual}], current}` |

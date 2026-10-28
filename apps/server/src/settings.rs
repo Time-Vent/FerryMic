@@ -11,6 +11,8 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use crate::library::SoundDefaults;
+
 /// 数据目录（存放 `settings.json`，以及默认的音效库 `sounds/`）。
 /// The data directory (holds `settings.json` and the default sound library `sounds/`).
 ///
@@ -103,6 +105,10 @@ pub struct Settings {
     /// Linux: create a virtual microphone at start-up (PipeWire / PulseAudio). Ignored
     /// elsewhere.
     pub auto_virtual_mic: bool,
+    /// 新音效的初始设置。Initial settings for new sounds.
+    pub sound_defaults: SoundDefaults,
+    /// 用户添加的音效资源网站（内置的在界面里）。User-added sound sites (built-ins live in the UI).
+    pub custom_sites: Vec<CustomSite>,
 }
 
 impl Default for Settings {
@@ -123,6 +129,8 @@ impl Default for Settings {
             close_action: CloseAction::Ask,
             language: "system".into(),
             auto_virtual_mic: true,
+            sound_defaults: SoundDefaults::default(),
+            custom_sites: Vec::new(),
         }
     }
 }
@@ -134,6 +142,31 @@ impl Settings {
             .clone()
             .unwrap_or_else(|| data_dir().join("sounds"))
     }
+}
+
+/// 用户添加的音效资源网站。A user-added sound site.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CustomSite {
+    pub name: String,
+    pub url: String,
+}
+
+/// 自定义网站最多几个。Maximum number of custom sites.
+pub const MAX_CUSTOM_SITES: usize = 50;
+
+/// 是否是可以打开的网页地址：只允许 http(s)，不含空白与控制字符。
+/// Whether a string is a web address we may open: http(s) only, no whitespace or
+/// control characters.
+pub fn is_web_url(s: &str) -> bool {
+    let lower = s.to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"));
+    matches!(rest, Some(r) if !r.is_empty() && !r.starts_with('/'))
+        && s.len() <= 2048
+        && !s
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '"')
 }
 
 /// 校验 `#rrggbb` 颜色。Validate a `#rrggbb` colour.
@@ -205,6 +238,18 @@ fn default_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn web_urls_only() {
+        assert!(is_web_url("https://freesound.org/"));
+        assert!(is_web_url("http://example.com/a?b=1&c=2"));
+        assert!(!is_web_url("file:///C:/Windows"));
+        assert!(!is_web_url("javascript:alert(1)"));
+        assert!(!is_web_url("https://"));
+        assert!(!is_web_url("https:///path"));
+        assert!(!is_web_url("https://a.com/ b"));
+        assert!(!is_web_url("https://a.com/\"x"));
+    }
 
     #[test]
     fn round_trips_through_file() {

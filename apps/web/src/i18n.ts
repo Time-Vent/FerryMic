@@ -46,13 +46,13 @@ const EN: Record<string, string> = {
   '麦克风音量（双击恢复 0 dB）': 'Mic volume (double-click for 0 dB)',
   '试听：音效同时在耳机 / 扬声器里播放': 'Monitor: also play effects on headphones / speakers',
   '混音发送到哪里（点击修改）': 'Where the mix is sent (click to change)',
-  游戏麦克风选: 'Mic to pick in games',
+  其他软件的麦克风选: 'Mic to pick in other apps',
   正在用扬声器输出: 'Outputting to speakers',
-  '游戏收不到，点此改为虚拟音频线': "Games can't hear it — switch to a virtual cable",
+  '其他软件收不到，点此改为虚拟音频线': "Other apps can't hear it — switch to a virtual cable",
   '混音正在输出到「{device}」，只有你自己能听到。点击在设置里改为虚拟音频线（如 CABLE Input）。':
     'The mix is going to "{device}", so only you can hear it. Click to switch to a virtual cable (e.g. CABLE Input) in Settings.',
-  '你的声音 + 音效发送到「{device}」；游戏 / 语音软件里麦克风选「{mic}」。':
-    'Your voice + effects go to "{device}"; in games / voice apps pick "{mic}" as the microphone.',
+  '你的声音 + 音效输出到「{device}」；其他软件的麦克风选「{mic}」。':
+    'Your voice + effects go to "{device}"; in other apps pick "{mic}" as the microphone.',
   '已静音，点击取消': 'Muted — click to unmute',
   点击静音: 'Click to mute',
   麦克风: 'Microphone',
@@ -118,7 +118,7 @@ const EN: Record<string, string> = {
   '变速同时变调，双击滑块恢复 1.0×': 'Speed changes pitch too; double-click the slider for 1.0×',
   快捷键: 'Hotkey',
   清除: 'Clear',
-  '点击后按下组合键（游戏全屏时也能触发），Esc 取消': 'Click, then press a key combo (works in full-screen games); Esc cancels',
+  '点击后按下组合键（其他程序全屏时也能触发），Esc 取消': 'Click, then press a key combo (works while other programs are full-screen); Esc cancels',
   取消: 'Cancel',
   保存: 'Save',
   确定: 'OK',
@@ -165,7 +165,7 @@ const EN: Record<string, string> = {
   音频链路: 'Audio chain',
   '混音 + 音效': 'Mix + effects',
   虚拟麦克风: 'Virtual mic',
-  '游戏 / 语音': 'Games / voice',
+  '其他软件': 'Other apps',
   '你的麦克风（输入）': 'Your mic (input)',
   刷新设备列表: 'Refresh the device list',
   刷新: 'Refresh',
@@ -175,19 +175,18 @@ const EN: Record<string, string> = {
   '{name}（未连接）': '{name} (not connected)',
   '正在使用：{device}（{rate} Hz）': 'In use: {device} ({rate} Hz)',
   '切换麦克风失败：{error}': 'Switching the microphone failed: {error}',
-  '发送给游戏（输出）': 'Send to games (output)',
-  发送给游戏: 'Send to games',
-  '虚拟音频线（推荐，游戏能收到）': 'Virtual cables (recommended — games hear it)',
-  '扬声器 / 耳机（只能自己听，游戏收不到）': "Speakers / headphones (only you hear it — games don't)",
-  '当前输出是扬声器：只有你自己能听到，游戏收不到。请选择一条虚拟音频线（如 {cable}），没有的话需要先安装 VB-Cable。':
-    "The output is a speaker: only you can hear it, games can't. Pick a virtual audio cable (e.g. {cable}); install VB-Cable first if you don't have one.",
-  '游戏 / Discord / 会议软件里，麦克风选 {mic}': 'In games / Discord / meeting apps, pick {mic} as the microphone',
-  '已发送到「{device}」': 'Now sending to "{device}"',
-  '已切换到扬声器（游戏收不到）': "Switched to speakers (games can't hear it)",
+  '输出音频线路': 'Output line',
+  '虚拟音频线（推荐，其他软件可当作麦克风）': 'Virtual cables (recommended — other apps can use it as a mic)',
+  '扬声器 / 耳机（只有自己能听到）': 'Speakers / headphones (only you hear it)',
+  '当前输出是扬声器：只有你自己能听到，其他软件收不到。请选择一条虚拟音频线（如 {cable}），没有的话需要先安装 VB-Cable。':
+    "The output is a speaker: only you can hear it, other apps can't. Pick a virtual audio cable (e.g. {cable}); install VB-Cable first if you don't have one.",
+  '其他软件的麦克风选 {mic}': 'In other apps, pick {mic} as the microphone',
+  '已输出到「{device}」': 'Now outputting to "{device}"',
+  '已切换到扬声器（其他软件收不到）': "Switched to speakers (other apps can't hear it)",
   '切换输出失败：{error}': 'Switching the output failed: {error}',
   '无法读取设备列表：{error}': "Can't read the device list: {error}",
   '自动创建虚拟麦克风（重启生效）': 'Create a virtual mic automatically (after restart)',
-  '已创建：游戏 / 语音软件的麦克风选「{source}」': 'Created: pick "{source}" as the mic in games / voice apps',
+  '已创建：其他软件的麦克风选「{source}」': 'Created: pick "{source}" as the mic in other apps',
   '未创建：{note}': 'Not created: {note}',
   '未启用（已选择其它输出设备）': 'Off (another output device is selected)',
   '重启 SoundBridge 后生效': 'Takes effect after restarting SoundBridge',
@@ -210,10 +209,64 @@ const EN: Record<string, string> = {
     'In the tray, sounds, hotkeys and the phone remote keep working; click the tray icon to reopen.',
 
   基础操作: 'Basics',
-  '各平台接入游戏 / 语音软件': 'Connecting games / voice apps on each platform',
+  '各平台接入其他软件': 'Connecting other apps on each platform',
   当前系统: 'This system',
   关于: 'About',
   '设置保存在：': 'Settings are saved in: ',
+
+  // ---- 新音效的默认设置 Defaults for new sounds ----
+  新音效的默认设置: 'Defaults for new sounds',
+  关闭则每次播一遍: 'Off = play once each time',
+  应用到所有现有音效: 'Apply to all existing sounds',
+  '导入或放进音效库文件夹的新音效会使用这些设置；已有音效不会自动改变。':
+    "New sounds (imported or put into the library folder) start with these settings; existing sounds don't change automatically.",
+  '把这些默认设置应用到全部 {n} 个音效？快捷键不受影响。': 'Apply these defaults to all {n} sounds? Hotkeys are not affected.',
+  '已应用到 {n} 个音效': 'Applied to {n} sounds',
+  '应用失败：{error}': 'Apply failed: {error}',
+
+  // ---- 音效资源 Sound sites ----
+  音效资源: 'Sound sites',
+  推荐网站: 'Recommended',
+  我添加的: 'My sites',
+  '还没有添加网址。点右上角「添加网址」，把常用的音效网站收藏到这里。':
+    'No sites yet. Click "Add site" at the top right to keep your favourite sound sites here.',
+  '{n} 个网站': '{n} sites',
+  预览: 'Preview',
+  打开: 'Open',
+  在浏览器中打开: 'Open in browser',
+  编辑: 'Edit',
+  添加网址: 'Add site',
+  编辑网址: 'Edit site',
+  '网址（如 freesound.org）': 'Address (e.g. freesound.org)',
+  下一步: 'Next',
+  网站名称: 'Site name',
+  删除网站: 'Remove site',
+  '删除「{name}」？': 'Remove "{name}"?',
+  '点「预览」在 App 窗口里打开网站并试听；在预览窗口里下载的音频文件会自动存进音效库的「下载」文件夹。':
+    'Click "Preview" to open a site in an app window and listen there; audio files you download in that window are saved straight into the "Downloads" folder of your library.',
+  '最大的开放音效社区之一，数十万条用户上传的音效，可在线试听。':
+    'One of the largest open sound communities: hundreds of thousands of user uploads you can preview online.',
+  'CC0 / CC BY 等，下载需免费注册': 'CC0 / CC BY etc.; free sign-up to download',
+  '大量免费音效，分类清晰，可在线试听。': 'Lots of free sound effects, clearly categorised, with online preview.',
+  'Pixabay 许可：免费可商用，无需署名': 'Pixabay licence: free for commercial use, no attribution',
+  '精选免费音效，质量整齐，免注册直接下载。': 'Curated free sound effects of consistent quality; download without signing up.',
+  'Mixkit 免费许可': 'Mixkit free licence',
+  '十几万条专业音效，分类细致。': 'Well over a hundred thousand professional sound effects, finely categorised.',
+  '下载需注册，免费账号需署名': 'Sign-up required; free accounts must give attribution',
+  '老牌免费音效站，常见日常音效齐全。': 'A long-running free site with all the common everyday sounds.',
+  'CC BY / 公有领域等，逐条标注': 'CC BY / public domain etc., marked per sound',
+  'BBC 公开的音效档案，环境声、拟音丰富。': "The BBC's public sound archive, rich in ambience and Foley.",
+  'RemArc 许可：个人、教育、研究用途免费': 'RemArc licence: free for personal, educational and research use',
+  '开源素材社区，含大量音效与音乐。': 'An open-source asset community with many sound effects and music.',
+  'CC0 / CC BY / GPL 等，逐条标注': 'CC0 / CC BY / GPL etc., marked per item',
+  '每年免费发布的大型专业音效合集（数十 GB）。': 'A large professional sound bundle released free every year (tens of GB).',
+  '免版税，可商用': 'Royalty-free, commercial use allowed',
+  '热门梗音效按钮，点一下就能试听。': 'Popular meme sound buttons — click to listen.',
+  '用户上传，版权不明，建议仅自用': 'User uploads with unclear rights; best for personal use',
+  '中文音效素材站，分类多、搜索方便。': 'A Chinese sound library with many categories and easy search.',
+  '免费与付费混合，按单个素材的授权使用': 'Mix of free and paid; follow each item\'s licence',
+  '免费音效与按钮音，免注册下载。': 'Free sound effects and button sounds, no sign-up needed.',
+  '免费使用，需遵守网站条款': "Free to use under the site's terms",
 
   // ---- 手机遥控 Phone remote ----
   '允许同一 Wi-Fi 下的手机打开界面': 'Let phones on the same Wi-Fi open the interface',
@@ -239,27 +292,28 @@ const EN_HTML: Record<string, string> = {
     <li><b>Import</b>: drag audio files into the window (or onto a folder on the left), or click "Import" at the top right. Files are saved into the library folder.</li>
     <li><b>Play</b>: click a card. While it plays, drag the progress bar at the bottom of the card to seek; click the round button to stop; "Stop all" is at the top right.</li>
     <li><b>Card buttons</b>: the loop icon switches loop / play once (press a looping card again to stop); the exclusive icon (one dot) / overlap icon (two circles) decides whether it stops other sounds; volume opens a vertical slider; speed steps through presets (right-click goes back).</li>
-    <li><b>Hotkeys</b>: open the editor with "⋯" on the card, click the hotkey box and press a key combo; it works in full-screen games too.</li>
+    <li><b>Hotkeys</b>: open the editor with "⋯" on the card, click the hotkey box and press a key combo; it works while other programs are full-screen too.</li>
     <li><b>Folders</b>: create and rename folders on the left; drag a card onto a folder to move it. After changing files in the file manager, click "Rescan".</li>
     <li><b>Your mic</b>: mute, adjust and watch the level at the bottom left; pick the device under "Audio chain" here (by default a hardware mic is picked automatically).</li>
-    <li><b>Send to games</b>: the bottom right shows which mic to pick in games; choose the virtual cable under "Audio chain" here.</li>
-    <li><b>Monitor</b>: once the mix goes to games you can't hear it yourself; turn on the headphones button at the bottom and the effects also play on your headphones (without your own voice).</li>
-    <li><b>Phone remote</b>: the phone button on the left turns it on or off; scan the QR code to open the same interface on your phone.</li>`,
+    <li><b>Output line</b>: the bottom right shows which mic to pick in other apps; choose the virtual cable under "Audio chain" here.</li>
+    <li><b>Monitor</b>: once the mix goes to a virtual cable you can't hear it yourself; turn on the headphones button at the bottom and the effects also play on your headphones (without your own voice).</li>
+    <li><b>Phone remote</b>: the phone button on the left turns it on or off; scan the QR code to open the same interface on your phone.</li>
+    <li><b>Sound sites</b>: the globe button on the left lists free / open sound websites, and you can add your own; in the app, "Preview" opens a site in a window, and audio you download there is saved straight into the library's "Downloads" folder.</li>`,
   'help-windows': `
     <li>Install a virtual audio cable such as VB-Cable (free).</li>
-    <li>Under "Audio chain → Send to games" here, pick <code>CABLE Input</code>.</li>
-    <li>In games / Discord / meeting apps, pick <code>CABLE Output</code> as the microphone (shown at the bottom right).</li>
+    <li>Under "Audio chain → Output line" here, pick <code>CABLE Input</code>.</li>
+    <li>In other apps, pick <code>CABLE Output</code> as the microphone (shown at the bottom right).</li>
     <li>Turn on "Monitor" to hear your effects on your headphones.</li>
-    <li>Keep the default playback device in Windows "Sound settings" on your headphones or speakers, not CABLE Input — otherwise game audio leaks into the mic.</li>`,
+    <li>Keep the default playback device in Windows "Sound settings" on your headphones or speakers, not CABLE Input — otherwise everything the computer plays leaks into the mic.</li>`,
   'help-linux': `
     <li>Requires PipeWire (with pipewire-pulse) or PulseAudio, plus the <code>pactl</code> command (pulseaudio-utils).</li>
     <li>SoundBridge creates the virtual mic <code>SoundBridge-Microphone</code> at start-up and removes it on exit.</li>
-    <li>In games / Discord, pick <code>SoundBridge-Microphone</code> as the microphone.</li>
+    <li>In other apps, pick <code>SoundBridge-Microphone</code> as the microphone.</li>
     <li>Global hotkeys need an X11 session (on Wayland, switch to X11, or trigger sounds from the window / phone remote).</li>`,
   'help-macos': `
     <li>Install a virtual audio device such as BlackHole 2ch.</li>
-    <li>Under "Audio chain → Send to games" here, pick <code>BlackHole 2ch</code>.</li>
-    <li>In games / voice apps, pick <code>BlackHole 2ch</code> as the microphone. On first use, allow microphone access under "Privacy &amp; Security".</li>`,
+    <li>Under "Audio chain → Output line" here, pick <code>BlackHole 2ch</code>.</li>
+    <li>In other apps, pick <code>BlackHole 2ch</code> as the microphone. On first use, allow microphone access under "Privacy &amp; Security".</li>`,
 };
 
 /** 当前语言。The current language. */

@@ -45,6 +45,13 @@ use virtual_mic::{VirtualMic, VirtualMicInfo};
 
 pub use settings::{data_dir, CloseAction, Settings};
 
+/// 文件名是否是支持的音频格式（按扩展名）。Whether a file name is a supported audio format
+/// (by extension).
+pub fn is_audio_file(name: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(_, ext)| library::is_audio_ext(ext))
+}
+
 /// 默认端口。Default port.
 pub const DEFAULT_PORT: u16 = 8321;
 
@@ -62,6 +69,8 @@ pub enum WindowAction {
 pub type SettingsHook = Arc<dyn Fn(&Settings) + Send + Sync>;
 /// 关闭询问选好后的回调。Callback once the close prompt is answered.
 pub type WindowHook = Arc<dyn Fn(WindowAction) + Send + Sync>;
+/// 在 App 窗口里打开网址的回调（网址, 标题）。Callback to open a URL in an app window (url, title).
+pub type UrlHook = Arc<dyn Fn(String, String) + Send + Sync>;
 
 /// 桌面外壳的回调（浏览器版没有）。Callbacks for the desktop shell (absent in the
 /// browser version).
@@ -72,6 +81,9 @@ pub struct Hooks {
     pub on_settings: Option<SettingsHook>,
     /// 关闭询问选好后调用。Called once the close prompt is answered.
     pub on_window_action: Option<WindowHook>,
+    /// 在 App 里的预览窗口打开网址；没有时用系统浏览器。Open a URL in the app's preview
+    /// window; without it the system browser is used.
+    pub on_open_url: Option<UrlHook>,
 }
 
 /// 外壳持有的控制句柄。A control handle held by the shell.
@@ -213,7 +225,7 @@ pub async fn run(config: ServerConfig, on_ready: impl FnOnce(ServerInfo)) -> any
     // 音效库：先迁移旧版数据，再打开根目录。Library: migrate old data, then open the root.
     let root = saved.library_root();
     library::migrate_v1(&data_dir, &root);
-    let library = Arc::new(Library::open(root));
+    let library = Arc::new(Library::open_with(root, saved.sound_defaults.clamped()));
 
     // 命令通道：加载线程 / Web API / 热键 → 音频线程。
     // Command channel: loader / web API / hotkeys → audio.

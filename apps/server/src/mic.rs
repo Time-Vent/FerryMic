@@ -460,8 +460,8 @@ impl InputRisk {
                 "\"{input}\" is the other end of the output \"{output}\" and would loop back; pick a real microphone"
             ),
             Self::SystemLoopback => trf!(
-                "「{input}」是回录设备，会把电脑正在播放的所有声音（包括游戏）录进去，请选择真实麦克风",
-                "\"{input}\" records everything the computer plays (games included); pick a real microphone"
+                "「{input}」是回录设备，会把电脑正在播放的所有声音录进去，请选择真实麦克风",
+                "\"{input}\" records everything the computer plays; pick a real microphone"
             ),
         }
     }

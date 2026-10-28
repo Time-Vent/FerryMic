@@ -20,10 +20,13 @@ import {
   type OutputItem,
   type RemoteStatus,
   type Sound,
+  type CustomSite,
+  type SoundDefaults,
   type SoundPatch,
   type ThemeMode,
 } from './api';
 import { icons } from './icons';
+import { BUILTIN_SITES, hostOf, normalizeUrl } from './sites';
 import { currentLang, initLang, setLang, t, type Lang, type LangPref } from './i18n';
 
 // ---- 状态 State ----
@@ -89,7 +92,7 @@ function writeLocal(key: string, value: unknown): void {
 function hydrateIcons(root: ParentNode = document): void {
   root.querySelectorAll<HTMLElement>('[data-icon]').forEach((e) => {
     const name = e.dataset.icon as keyof typeof icons;
-    if (icons[name] && !e.querySelector('svg')) e.insertAdjacentHTML('afterbegin', icons[name]);
+    if (icons[name] && !e.querySelector(':scope > svg.icon')) e.insertAdjacentHTML('afterbegin', icons[name]);
   });
 }
 
@@ -100,7 +103,6 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
-/** 带图标的按钮。A button with an icon. */
 /** 按模板追加文字与节点：`{名字}` 处放入对应节点（用于句中带 <code> 的翻译）。
  *  Append text and nodes from a template: `{name}` slots take the given nodes (for
  *  translated sentences containing <code>). */
@@ -112,6 +114,7 @@ function appendTemplate(parent: HTMLElement, template: string, nodes: Record<str
   }
 }
 
+/** 带图标的按钮。A button with an icon. */
 function iconButton(cls: string, icon: keyof typeof icons, label: string): HTMLButtonElement {
   const b = el('button', cls);
   b.type = 'button';
@@ -619,8 +622,10 @@ function renderPad(s: Sound): HTMLElement {
 function renderControls(s: Sound): HTMLElement {
   const row = el('div', 'pad-controls');
 
+  // 循环 / 单次、独占 / 叠加：两种状态没有好坏之分，只换图标不变色。
+  // Loop / once and exclusive / overlap: neither state is "better", so only the icon changes.
   // 循环 / 单次：像音乐播放器的循环按钮，点一下切换。Loop / once, like a music player.
-  const loop = el('button', `chip icon-chip${s.looping ? ' on' : ''}`);
+  const loop = el('button', 'chip icon-chip toggle');
   loop.type = 'button';
   loop.innerHTML = s.looping ? icons.repeat : icons.repeatOnce;
   loop.title = s.looping ? t('循环播放（再按一下卡片停止）\n点击改为单次') : t('单次播放\n点击改为循环');
@@ -631,7 +636,7 @@ function renderControls(s: Sound): HTMLElement {
   });
 
   // 独占 / 叠加：与循环同样的图标按钮，点一下切换。Exclusive / overlap: same icon button style.
-  const excl = el('button', `chip icon-chip${s.exclusive ? ' on' : ''}`);
+  const excl = el('button', 'chip icon-chip toggle');
   excl.type = 'button';
   excl.innerHTML = s.exclusive ? icons.exclusive : icons.overlap;
   excl.title = s.exclusive ? t('独占：播放时打断其它音效\n点击改为叠加') : t('叠加：可与其它音效同时播放\n点击改为独占');
@@ -1214,8 +1219,8 @@ function renderMicStatusInSettings(): void {
     : (mic.note ?? t('等待麦克风连接…'));
 }
 
-/** 发送给游戏的下拉框：虚拟音频线（推荐）与扬声器分组。
- *  "Send to games" select: virtual cables (recommended) and speakers grouped. */
+/** 输出音频线路下拉框：虚拟音频线（推荐）与扬声器分组。
+ *  "Output line" select: virtual cables (recommended) and speakers grouped. */
 function renderOutputSelect(current: OutputInfo): void {
   const select = $<HTMLSelectElement>('output-select');
   if (document.activeElement === select) return;
@@ -1227,26 +1232,26 @@ function renderOutputSelect(current: OutputInfo): void {
     for (const d of items) g.appendChild(new Option(d.name, d.name));
     select.appendChild(g);
   };
-  group(t('虚拟音频线（推荐，游戏能收到）'), outputs.filter((o) => o.kind === 'virtual'));
-  group(t('扬声器 / 耳机（只能自己听，游戏收不到）'), outputs.filter((o) => o.kind === 'speaker'));
+  group(t('虚拟音频线（推荐，其他软件可当作麦克风）'), outputs.filter((o) => o.kind === 'virtual'));
+  group(t('扬声器 / 耳机（只有自己能听到）'), outputs.filter((o) => o.kind === 'speaker'));
   if (!outputs.some((o) => o.name === current.output_device)) {
     select.appendChild(new Option(current.output_device, current.output_device));
   }
   select.value = current.output_device;
 }
 
-/** 底部「发送目标」与设置里的提示：游戏里该选哪个麦克风，或扬声器警告。
+/** 底部「输出目标」与设置里的提示：其他软件里该选哪个麦克风，或扬声器警告。
  *  Bottom "send target" and the settings hint: which mic to pick, or a speaker warning. */
 function renderSendTarget(o: OutputInfo): void {
   const btn = $('send-target');
   const warn = o.output_kind === 'speaker';
   btn.classList.toggle('warn', warn);
   btn.querySelector('.send-icon')!.innerHTML = warn ? icons.warning : icons.send;
-  $('send-label').textContent = warn ? t('正在用扬声器输出') : t('游戏麦克风选');
-  $('send-name').textContent = warn ? t('游戏收不到，点此改为虚拟音频线') : (o.game_mic ?? o.output_device);
+  $('send-label').textContent = warn ? t('正在用扬声器输出') : t('其他软件的麦克风选');
+  $('send-name').textContent = warn ? t('其他软件收不到，点此改为虚拟音频线') : (o.game_mic ?? o.output_device);
   btn.title = warn
     ? t('混音正在输出到「{device}」，只有你自己能听到。点击在设置里改为虚拟音频线（如 CABLE Input）。', { device: o.output_device })
-    : t('你的声音 + 音效发送到「{device}」；游戏 / 语音软件里麦克风选「{mic}」。', {
+    : t('你的声音 + 音效输出到「{device}」；其他软件的麦克风选「{mic}」。', {
         device: o.output_device,
         mic: o.game_mic ?? o.output_device,
       });
@@ -1257,11 +1262,11 @@ function renderSendTarget(o: OutputInfo): void {
   if (warn) {
     appendTemplate(
       hint,
-      t('当前输出是扬声器：只有你自己能听到，游戏收不到。请选择一条虚拟音频线（如 {cable}），没有的话需要先安装 VB-Cable。'),
+      t('当前输出是扬声器：只有你自己能听到，其他软件收不到。请选择一条虚拟音频线（如 {cable}），没有的话需要先安装 VB-Cable。'),
       { cable: el('code', '', 'CABLE Input') },
     );
   } else {
-    appendTemplate(hint, t('游戏 / Discord / 会议软件里，麦克风选 {mic}'), {
+    appendTemplate(hint, t('其他软件的麦克风选 {mic}'), {
       mic: el('code', '', o.game_mic ?? o.output_device),
     });
   }
@@ -1317,6 +1322,8 @@ function renderAppInfo(info: AppInfo): void {
   const libInput = $<HTMLInputElement>('library-input');
   if (document.activeElement !== libInput) libInput.value = info.library_dir;
   $<HTMLInputElement>('tint-toggle').checked = info.tint_app_icon;
+  renderDefaults(info.sound_defaults);
+  if (view === 'sites') renderSites();
   const langSelect = $<HTMLSelectElement>('language-select');
   if (document.activeElement !== langSelect) langSelect.value = info.language;
   if (info.language_effective !== currentLang()) applyLanguage(info.language_effective);
@@ -1330,7 +1337,7 @@ function renderAppInfo(info: AppInfo): void {
   const vm = info.virtual_mic;
   $('vmic-status').textContent = vm
     ? vm.active
-      ? t('已创建：游戏 / 语音软件的麦克风选「{source}」', { source: vm.source })
+      ? t('已创建：其他软件的麦克风选「{source}」', { source: vm.source })
       : t('未创建：{note}', { note: vm.note ?? '' })
     : t('未启用（已选择其它输出设备）');
 
@@ -1408,8 +1415,8 @@ function setupSettings(): void {
     }
   });
 
-  // 发送给游戏（输出）：切换后麦克风与试听会自动重开，设备列表也要刷新（反馈环过滤随之变化）。
-  // Send to games (output): the mic and monitor reopen automatically; refresh the device
+  // 输出音频线路：切换后麦克风与试听会自动重开，设备列表也要刷新（反馈环过滤随之变化）。
+  // Output line: the mic and monitor reopen automatically; refresh the device
   // lists too (the loop filter depends on the output).
   const outSelect = $<HTMLSelectElement>('output-select');
   outSelect.addEventListener('change', async () => {
@@ -1419,8 +1426,8 @@ function setupSettings(): void {
       renderSendTarget(info);
       toast(
         info.output_kind === 'virtual'
-          ? t('已发送到「{device}」', { device: info.output_device })
-          : t('已切换到扬声器（游戏收不到）'),
+          ? t('已输出到「{device}」', { device: info.output_device })
+          : t('已切换到扬声器（其他软件收不到）'),
       );
     } catch (e) {
       toast(t('切换输出失败：{error}', { error: errorText(e) }), 'error');
@@ -1505,6 +1512,227 @@ function setupSettings(): void {
   $('open-library').addEventListener('click', openLib);
 }
 
+// ---- 音效资源 Sound sites ----
+
+let view: 'library' | 'sites' = 'library';
+
+/** 切换主区域：音效库 / 音效资源。Switch the main area: library / sound sites. */
+function setView(next: 'library' | 'sites'): void {
+  view = next;
+  document.body.classList.toggle('view-sites', next === 'sites');
+  $('view-library').classList.toggle('active', next === 'library');
+  $('view-sites').classList.toggle('active', next === 'sites');
+  if (next === 'sites') renderSites();
+}
+
+function renderSites(): void {
+  const grid = $('sites-grid');
+  grid.innerHTML = '';
+  const custom = appInfo?.custom_sites ?? [];
+
+  grid.append(el('h2', 'sites-heading', t('推荐网站')));
+  const builtin = el('div', 'sites-cards');
+  for (const s of BUILTIN_SITES) builtin.append(siteCard(s.name, s.url, t(s.desc), t(s.license), null));
+  grid.append(builtin);
+
+  grid.append(el('h2', 'sites-heading', t('我添加的')));
+  const mine = el('div', 'sites-cards');
+  if (!custom.length) mine.append(el('p', 'hint', t('还没有添加网址。点右上角「添加网址」，把常用的音效网站收藏到这里。')));
+  custom.forEach((c, i) => mine.append(siteCard(c.name, c.url, '', '', i)));
+  grid.append(mine);
+
+  $('sites-count').textContent = t('{n} 个网站', { n: BUILTIN_SITES.length + custom.length });
+}
+
+function siteCard(name: string, url: string, desc: string, license: string, customIndex: number | null): HTMLElement {
+  const card = el('div', 'site-card');
+  const head = el('div', 'site-head');
+  const titles = el('div', 'site-titles');
+  titles.append(el('b', '', name), el('small', '', hostOf(url)));
+  head.append(el('span', 'site-avatar', name.slice(0, 1).toUpperCase()), titles);
+  card.append(head);
+  if (desc) card.append(el('p', 'site-desc', desc));
+  if (license) card.append(el('span', 'site-license', license));
+
+  const actions = el('div', 'site-actions');
+  const open = el('button', 'btn primary small');
+  open.type = 'button';
+  open.innerHTML = `${icons.globe}<span>${appInfo?.is_app ? t('预览') : t('打开')}</span>`;
+  open.title = url;
+  open.addEventListener('click', () => openSite(url, name, false));
+  actions.append(open);
+  // App 里另给一个「在浏览器中打开」（需要登录的网站在常用浏览器里更方便）。
+  // In the app, also offer "open in browser" (handy for sites needing your usual login).
+  if (appInfo?.is_app) {
+    const ext = iconButton('icon-btn small', 'external', t('在浏览器中打开'));
+    ext.addEventListener('click', () => openSite(url, name, true));
+    actions.append(ext);
+  }
+  if (customIndex !== null) {
+    const edit = iconButton('icon-btn small', 'edit', t('编辑'));
+    edit.addEventListener('click', () => editSite(customIndex));
+    const del = iconButton('icon-btn small', 'trash', t('删除'));
+    del.addEventListener('click', () => deleteSite(customIndex));
+    actions.append(el('div', 'spacer'), edit, del);
+  }
+  card.append(actions);
+  return card;
+}
+
+/** 打开网站：App 里在预览窗口（或系统浏览器），浏览器版 / 手机上开新标签页。
+ *  Open a site: the preview window (or system browser) in the app; a new tab in the
+ *  browser version / on phones. */
+async function openSite(url: string, name: string, external: boolean): Promise<void> {
+  if (!appInfo?.is_app) {
+    window.open(url, '_blank', 'noopener');
+    return;
+  }
+  try {
+    await api.openUrl(url, name, external);
+  } catch (e) {
+    toast(errorText(e), 'error');
+  }
+}
+
+async function saveSites(list: CustomSite[]): Promise<void> {
+  try {
+    appInfo = await api.setSettings({ custom_sites: list });
+    renderSites();
+  } catch (e) {
+    toast(t('保存失败：{error}', { error: errorText(e) }), 'error');
+  }
+}
+
+/** 先问网址、再问名称（默认取主机名）。Ask for the address, then the name (host by default). */
+async function askSite(initial?: CustomSite): Promise<CustomSite | null> {
+  const raw = await promptText({
+    title: initial ? t('编辑网址') : t('添加网址'),
+    message: t('网址（如 freesound.org）'),
+    value: initial?.url ?? '',
+    okText: t('下一步'),
+  });
+  if (raw === null || !raw.trim()) return null;
+  const url = normalizeUrl(raw);
+  const name = await promptText({ title: t('网站名称'), message: url, value: initial?.name ?? hostOf(url) });
+  if (name === null || !name.trim()) return null;
+  return { name: name.trim(), url };
+}
+
+async function editSite(index: number): Promise<void> {
+  const list = [...(appInfo?.custom_sites ?? [])];
+  const next = await askSite(list[index]);
+  if (!next) return;
+  list[index] = next;
+  await saveSites(list);
+}
+
+async function deleteSite(index: number): Promise<void> {
+  const list = [...(appInfo?.custom_sites ?? [])];
+  const ok = await promptText({
+    title: t('删除网站'),
+    message: t('删除「{name}」？', { name: list[index].name }),
+    okText: t('删除'),
+    confirmOnly: true,
+  });
+  if (ok === null) return;
+  list.splice(index, 1);
+  await saveSites(list);
+}
+
+function setupSites(): void {
+  $('view-library').addEventListener('click', () => setView('library'));
+  $('view-sites').addEventListener('click', () => setView('sites'));
+  $('add-site').addEventListener('click', async () => {
+    const site = await askSite();
+    if (site) await saveSites([...(appInfo?.custom_sites ?? []), site]);
+  });
+}
+
+// ---- 新音效的默认设置 Defaults for new sounds ----
+
+function renderDefaults(d: SoundDefaults): void {
+  $<HTMLInputElement>('def-looping').checked = d.looping;
+  $<HTMLInputElement>('def-exclusive').checked = d.exclusive;
+  const gain = $<HTMLInputElement>('def-gain');
+  const speed = $<HTMLInputElement>('def-speed');
+  if (document.activeElement !== gain) gain.value = String(d.gain_db);
+  if (document.activeElement !== speed) speed.value = String(d.speed);
+  $('def-gain-out').textContent = formatGain(Number(gain.value));
+  $('def-speed-out').textContent = formatSpeed(Number(speed.value));
+  syncRangeFill(gain);
+  syncRangeFill(speed);
+}
+
+/** 读取设置里的默认值。Read the defaults from the settings form. */
+function readDefaults(): SoundDefaults {
+  return {
+    looping: $<HTMLInputElement>('def-looping').checked,
+    exclusive: $<HTMLInputElement>('def-exclusive').checked,
+    gain_db: Number($<HTMLInputElement>('def-gain').value),
+    speed: Number($<HTMLInputElement>('def-speed').value),
+  };
+}
+
+function setupDefaults(): void {
+  let timer = 0;
+  const save = () => {
+    clearTimeout(timer);
+    timer = window.setTimeout(async () => {
+      try {
+        appInfo = await api.setSettings({ sound_defaults: readDefaults() });
+      } catch (e) {
+        toast(errorText(e), 'error');
+      }
+    }, 250);
+  };
+  for (const id of ['def-looping', 'def-exclusive']) $(id).addEventListener('change', save);
+  const gain = $<HTMLInputElement>('def-gain');
+  const speed = $<HTMLInputElement>('def-speed');
+  gain.addEventListener('input', () => {
+    $('def-gain-out').textContent = formatGain(Number(gain.value));
+    save();
+  });
+  speed.addEventListener('input', () => {
+    $('def-speed-out').textContent = formatSpeed(Number(speed.value));
+    save();
+  });
+  // 双击恢复。Double-click to reset.
+  gain.addEventListener('dblclick', () => {
+    gain.value = '0';
+    gain.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  speed.addEventListener('dblclick', () => {
+    speed.value = '1';
+    speed.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+  // 应用到所有现有音效（快捷键、名称、文件夹不变）。
+  // Apply to every existing sound (hotkeys, names and folders are unchanged).
+  $('def-apply-all').addEventListener('click', async () => {
+    await loadLibrary(); // 先同步磁盘上的变化。Pick up on-disk changes first.
+    const n = library.sounds.length;
+    if (!n) return;
+    const ok = await promptText({
+      title: t('应用到所有现有音效'),
+      message: t('把这些默认设置应用到全部 {n} 个音效？快捷键不受影响。', { n }),
+      okText: t('应用'),
+      confirmOnly: true,
+    });
+    if (ok === null) return;
+    const d = readDefaults();
+    try {
+      for (const s of library.sounds) {
+        await api.updateSound(s.id, { looping: d.looping, exclusive: d.exclusive, gain_db: d.gain_db, speed: d.speed });
+      }
+      await loadLibrary();
+      toast(t('已应用到 {n} 个音效', { n }));
+    } catch (e) {
+      toast(t('应用失败：{error}', { error: errorText(e) }), 'error');
+      await loadLibrary();
+    }
+  });
+}
+
 // ---- 语言 Language ----
 
 /** 切换语言：静态文字由 i18n 替换，动态内容重新渲染。
@@ -1522,6 +1750,7 @@ function applyLanguage(lang: Lang): void {
     renderRemote(appInfo.remote);
   }
   renderMicSelect();
+  if (view === 'sites') renderSites();
   if ($<HTMLDialogElement>('settings-dialog').open) loadDevices();
 }
 
@@ -1716,6 +1945,8 @@ setupSettings();
 setupRemote();
 setupClosePrompt();
 setupLanguage();
+setupDefaults();
+setupSites();
 // 所有静态元素（含动态生成的色板）就绪后再翻译。Translate once every static element exists.
 initLang();
 $('new-folder').addEventListener('click', () => newFolder(currentFolder));

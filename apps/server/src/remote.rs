@@ -39,6 +39,7 @@ const DESKTOP_ONLY: &[&str] = &[
     "/api/library/open",
     "/api/output",
     "/api/monitor",
+    "/api/open-url",
 ];
 
 /// 遥控状态（供界面显示）。Remote status (for the UI).

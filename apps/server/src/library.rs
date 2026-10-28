@@ -59,14 +59,59 @@ fn default_speed() -> f32 {
     1.0
 }
 
-impl SoundMeta {
-    fn new(id: SoundId) -> Self {
+/// 新音效的初始设置（设置里可改）。默认独占、单次、0 dB、1.0×。
+/// Initial settings for new sounds (editable in Settings). Defaults: exclusive, play
+/// once, 0 dB, 1.0×.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SoundDefaults {
+    pub looping: bool,
+    pub exclusive: bool,
+    pub gain_db: f32,
+    pub speed: f32,
+}
+
+impl Default for SoundDefaults {
+    fn default() -> Self {
         Self {
-            id,
-            mode: PlayMode::default(),
-            trigger_mode: None,
+            looping: false,
+            exclusive: true,
             gain_db: 0.0,
             speed: 1.0,
+        }
+    }
+}
+
+impl SoundDefaults {
+    /// 限制到界面滑块的范围。Clamp to the UI slider ranges.
+    pub fn clamped(self) -> Self {
+        Self {
+            gain_db: if self.gain_db.is_finite() {
+                self.gain_db.clamp(-30.0, 12.0)
+            } else {
+                0.0
+            },
+            speed: if self.speed.is_finite() {
+                self.speed.clamp(0.5, 2.0)
+            } else {
+                1.0
+            },
+            ..self
+        }
+    }
+}
+
+impl SoundMeta {
+    fn new(id: SoundId, d: &SoundDefaults) -> Self {
+        Self {
+            id,
+            mode: PlayMode {
+                looping: d.looping,
+                exclusive: d.exclusive,
+            },
+            trigger_mode: None,
+            gain_db: d.gain_db,
+            speed: d.speed,
             hotkey: None,
         }
     }
@@ -142,6 +187,8 @@ struct State {
     /// 按相对路径排序。Sorted by relative path.
     entries: Vec<Entry>,
     folders: BTreeSet<String>,
+    /// 新发现的音效文件用的初始设置。Initial settings for newly found sound files.
+    defaults: SoundDefaults,
 }
 
 /// 音效库。Sound library.
@@ -152,7 +199,14 @@ pub struct Library {
 
 impl Library {
     /// 打开（必要时创建）根目录并扫描。Open (creating if needed) the root and scan it.
+    #[cfg(test)]
     pub fn open(root: PathBuf) -> Self {
+        Self::open_with(root, SoundDefaults::default())
+    }
+
+    /// 打开并扫描；新发现的音效用 `defaults` 作为初始设置。
+    /// Open and scan; newly found sounds start with `defaults`.
+    pub fn open_with(root: PathBuf, defaults: SoundDefaults) -> Self {
         let _ = std::fs::create_dir_all(&root);
         let meta = load_meta(&root);
         let mut state = State {
@@ -160,6 +214,7 @@ impl Library {
             meta,
             entries: Vec::new(),
             folders: BTreeSet::new(),
+            defaults,
         };
         scan(&mut state);
         Self {
@@ -170,6 +225,12 @@ impl Library {
 
     pub fn root(&self) -> PathBuf {
         self.state.lock().unwrap().root.clone()
+    }
+
+    /// 修改新音效的初始设置（已有音效不变）。Change the initial settings for new sounds
+    /// (existing sounds are unchanged).
+    pub fn set_defaults(&self, defaults: SoundDefaults) {
+        self.state.lock().unwrap().defaults = defaults;
     }
 
     /// 重新扫描磁盘。Rescan the disk.
@@ -452,7 +513,7 @@ fn scan(s: &mut State) -> ScanDiff {
         let mut meta = s.meta.sounds.get(&rel).cloned().unwrap_or_else(|| {
             let id = s.meta.next_id;
             s.meta.next_id += 1;
-            SoundMeta::new(id)
+            SoundMeta::new(id, &s.defaults)
         });
         // 手改文件导致 id 重复时重新分配。Reassign duplicated ids (hand-edited files).
         if !used.insert(meta.id) {
@@ -784,6 +845,48 @@ mod tests {
     fn touch(path: &Path) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, b"x").unwrap();
+    }
+
+    #[test]
+    fn new_sounds_use_defaults_existing_keep_theirs() {
+        let root = temp("sb-lib-defaults");
+        touch(&root.join("old.wav"));
+        // 默认：独占、单次。Default: exclusive, play once.
+        let lib = Library::open(root.clone());
+        let old = lib.entries()[0].meta.clone();
+        assert!(old.mode.exclusive && !old.mode.looping);
+
+        lib.set_defaults(SoundDefaults {
+            looping: true,
+            exclusive: false,
+            gain_db: -6.0,
+            speed: 1.5,
+        });
+        touch(&root.join("new.wav"));
+        lib.rescan();
+        let get = |rel: &str| {
+            lib.entries()
+                .into_iter()
+                .find(|e| e.rel == rel)
+                .unwrap()
+                .meta
+        };
+        let new = get("new.wav");
+        assert!(new.mode.looping && !new.mode.exclusive);
+        assert_eq!((new.gain_db, new.speed), (-6.0, 1.5));
+        // 已有音效不受影响。Existing sounds are unaffected.
+        assert_eq!(get("old.wav"), old);
+    }
+
+    #[test]
+    fn defaults_are_clamped() {
+        let d = SoundDefaults {
+            gain_db: 99.0,
+            speed: f32::NAN,
+            ..SoundDefaults::default()
+        }
+        .clamped();
+        assert_eq!((d.gain_db, d.speed), (12.0, 1.0));
     }
 
     #[test]

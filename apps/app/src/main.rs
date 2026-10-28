@@ -37,12 +37,15 @@ use soundbridge_server::{
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::webview::DownloadEvent;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 /// 主窗口标签。Main window label.
 const MAIN: &str = "main";
 /// 托盘图标 id。Tray icon id.
 const TRAY: &str = "tray";
+/// 音效资源预览窗口标签。Sound-site preview window label.
+const BROWSE: &str = "browse";
 /// 默认主题色的色相（图标原图的主色）。Hue of the default accent (the icon's base hue).
 const BASE_HUE: f32 = 246.1;
 
@@ -75,6 +78,19 @@ fn main() {
                         let _ = h.run_on_main_thread(move || match a {
                             WindowAction::Tray => hide_main(&h2),
                             WindowAction::Quit => h2.exit(0),
+                        });
+                    }
+                })),
+                on_open_url: Some(Arc::new({
+                    let h = handle.clone();
+                    move |url: String, title: String| {
+                        // 建窗口会等主线程，放到单独线程里，不占用服务的线程。
+                        // Building a window waits on the main thread; do it off the service threads.
+                        let h = h.clone();
+                        std::thread::spawn(move || {
+                            if let Err(e) = open_browse_window(&h, &url, &title) {
+                                log::warn!("无法打开预览窗口 can't open the preview window: {e}");
+                            }
                         });
                     }
                 })),
@@ -194,6 +210,93 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// 音效资源网站的预览窗口：在 App 里浏览网站、试听，下载的音频文件直接存进音效库。
+/// Preview window for sound sites: browse and listen inside the app; downloaded audio
+/// files are saved straight into the sound library.
+fn open_browse_window(app: &AppHandle, url: &str, title: &str) -> Result<(), String> {
+    let parsed: tauri::Url = url.parse().map_err(|e| format!("{e}"))?;
+    let title = if title.is_empty() {
+        "SoundBridge".to_string()
+    } else {
+        format!("{title} - SoundBridge")
+    };
+    // 已打开：换网址并提到前台。Already open: navigate and bring to front.
+    if let Some(w) = app.get_webview_window(BROWSE) {
+        w.navigate(parsed).map_err(|e| e.to_string())?;
+        let _ = w.set_title(&title);
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(app, BROWSE, WebviewUrl::External(parsed))
+        .title(title)
+        .inner_size(1100.0, 760.0)
+        .min_inner_size(480.0, 360.0)
+        .center()
+        .on_download(|webview, event| {
+            // 音频文件改存到音效库的「下载」文件夹；其它文件照常进系统下载目录。
+            // Audio files go to the library's "Downloads" folder; anything else goes to
+            // the system downloads folder as usual.
+            if let DownloadEvent::Requested { destination, .. } = event {
+                let name = destination
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if soundbridge_server::is_audio_file(&name) {
+                    if let Some(control) = webview.app_handle().try_state::<Control>() {
+                        let dir = control.settings().library_root().join(download_folder());
+                        if std::fs::create_dir_all(&dir).is_ok() {
+                            *destination = unique_path(&dir, &name);
+                            log::info!(
+                                "下载到音效库 downloading into the library: {}",
+                                destination.display()
+                            );
+                        }
+                    }
+                }
+            }
+            true
+        })
+        .build()
+        .map_err(|e| e.to_string())?;
+    // 新窗口也跟随主题色图标。The new window follows the tinted icon too.
+    if let Some(control) = app.try_state::<Control>() {
+        let s = control.settings();
+        let (h, accent, tint) = (app.clone(), s.accent, s.tint_app_icon);
+        let _ = app.run_on_main_thread(move || apply_icon(&h, &accent, tint));
+    }
+    Ok(())
+}
+
+/// 音效库里存放下载的文件夹名（按界面语言）。Library folder for downloads (UI language).
+fn download_folder() -> &'static str {
+    if soundbridge_server::i18n::is_en() {
+        "Downloads"
+    } else {
+        "下载"
+    }
+}
+
+/// 不覆盖已有文件：重名时加「 (2)」「 (3)」…。Never overwrite: append " (2)", " (3)"… on clashes.
+fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
+    (2..)
+        .map(|n| {
+            dir.join(if ext.is_empty() {
+                format!("{stem} ({n})")
+            } else {
+                format!("{stem} ({n}).{ext}")
+            })
+        })
+        .find(|p| !p.exists())
+        .expect("有限个文件 finitely many files")
+}
+
 /// 托盘菜单（按当前界面语言）。The tray menu (in the current UI language).
 fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let en = soundbridge_server::i18n::is_en();
@@ -228,7 +331,8 @@ fn apply_icon(app: &AppHandle, accent: &str, tint: bool) {
     } else {
         base_icon()
     };
-    if let Some(w) = app.get_webview_window(MAIN) {
+    // 主窗口与预览窗口都换。Both the main and the preview window.
+    for w in app.webview_windows().values() {
         let _ = w.set_icon(icon.clone());
     }
     if let Some(tray) = app.tray_by_id(TRAY) {

@@ -127,7 +127,23 @@ export interface AppInfo {
   language: 'system' | 'zh-CN' | 'en';
   /** 实际使用的语言。The language actually in use. */
   language_effective: 'zh-CN' | 'en';
+  sound_defaults: SoundDefaults;
+  custom_sites: CustomSite[];
   virtual_mic: VirtualMicInfo | null;
+}
+
+/** 用户添加的音效网站。A user-added sound site. */
+export interface CustomSite {
+  name: string;
+  url: string;
+}
+
+/** 新音效的初始设置。Initial settings for new sounds. */
+export interface SoundDefaults {
+  looping: boolean;
+  exclusive: boolean;
+  gain_db: number;
+  speed: number;
 }
 
 /** 可编辑字段；hotkey 为 null 表示清除。Editable fields; hotkey null clears it. */
@@ -148,6 +164,8 @@ export interface SettingsPatch {
   tint_app_icon?: boolean;
   close_action?: CloseAction;
   language?: 'system' | 'zh-CN' | 'en';
+  sound_defaults?: SoundDefaults;
+  custom_sites?: CustomSite[];
 }
 
 /** 发请求；非 2xx 时抛出带后端消息的错误。Send a request; throws with the backend message on non-2xx. */
@@ -173,6 +191,10 @@ function json<T>(path: string, method: string, body: unknown): Promise<T> {
 export const api = {
   app: () => request<AppInfo>('/api/app'),
   setSettings: (s: SettingsPatch) => json<AppInfo>('/api/settings', 'POST', s),
+  /** 打开网址：App 里默认用预览窗口，`external` 用系统浏览器。Open a URL: the app's preview
+   *  window by default, the system browser with `external`. */
+  openUrl: (url: string, title: string, external: boolean) =>
+    json<void>('/api/open-url', 'POST', { url, title, external }),
   pickFolder: () => request<{ path: string | null }>('/api/pick-folder', { method: 'POST' }),
   live: () => request<LiveState>('/api/live'),
   window: (action: 'tray' | 'quit' | 'cancel', remember: boolean) =>
