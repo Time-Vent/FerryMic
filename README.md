@@ -1,4 +1,4 @@
-# SoundBridge
+# FerryMic
 
 桌面端「麦克风 + 音效板」小工具：把你的麦克风和音效混在一起，输出到虚拟麦克风，
 游戏语音、会议、直播软件把它当作麦克风，对方就能同时听到你的声音和音效。
@@ -38,8 +38,8 @@ apps hear both your voice and the effects.
 powershell -ExecutionPolicy Bypass -File .\build-app.ps1
 ```
 
-产物在 `dist-app\SoundBridge\`（`SoundBridge.exe` + `WebView2Loader.dll`，两个文件放在一起），
-双击 `SoundBridge.exe` 即可运行，整个文件夹可以复制到任何位置。
+产物在 `dist-app\FerryMic\`（`FerryMic.exe` + `WebView2Loader.dll`，两个文件放在一起），
+双击 `FerryMic.exe` 即可运行，整个文件夹可以复制到任何位置。
 
 ### Linux 桌面 App
 
@@ -47,7 +47,7 @@ powershell -ExecutionPolicy Bypass -File .\build-app.ps1
 # Debian / Ubuntu 依赖（其它发行版请装对应包）
 sudo apt install build-essential pkg-config libasound2-dev libwebkit2gtk-4.1-dev \
      libgtk-3-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pulseaudio-utils
-./build-app.sh            # 产物：dist-app/SoundBridge/SoundBridge
+./build-app.sh            # 产物：dist-app/FerryMic/FerryMic
 ```
 
 > Linux 版目前只做了代码适配，尚未在真实 Linux 系统上实测（开发机为 Windows）。
@@ -102,7 +102,7 @@ cargo run --release --bin soundbridge-server
 | 平台 | 虚拟麦克风 | 游戏里选择的麦克风 |
 |---|---|---|
 | Windows | 安装 VB-Cable 等虚拟音频线；设置里「输出音频线路」选 `CABLE Input` | `CABLE Output` |
-| Linux | SoundBridge 启动时**自动创建**（需 `pactl`，PipeWire / PulseAudio 均可），退出时移除 | `SoundBridge-Microphone` |
+| Linux | FerryMic 启动时**自动创建**（需 `pactl`，PipeWire / PulseAudio 均可），退出时移除 | `FerryMic-Microphone` |
 | macOS | 安装 BlackHole；设置里「输出音频线路」选 `BlackHole 2ch` | `BlackHole 2ch` |
 
 - Windows：「声音设置」里的默认播放设备保持为耳机或扬声器，不要设成 `CABLE Input`，否则游戏声音也会进麦克风。
@@ -128,12 +128,16 @@ cargo run --release --bin soundbridge-server
 
 | 平台 | 位置 |
 |---|---|
-| Windows | `%APPDATA%\SoundBridge\` |
-| Linux | `$XDG_DATA_HOME/SoundBridge/`（默认 `~/.local/share/SoundBridge/`） |
-| macOS | `~/Library/Application Support/SoundBridge/` |
+| Windows | `%APPDATA%\FerryMic\` |
+| Linux | `$XDG_DATA_HOME/FerryMic/`（默认 `~/.local/share/FerryMic/`） |
+| macOS | `~/Library/Application Support/FerryMic/` |
 
 `settings.json` 保存麦克风与输出设备、试听、手机遥控（开关与访问码）、外观、语言、关闭窗口行为、音效库位置、新音效默认设置、自己添加的音效网站。旧版的 `library.json`
 会在首次启动时自动迁移进音效库文件夹（原文件改名为 `library.v1.json.bak`）。
+
+**改名说明**：本项目原名 SoundBridge。首次启动 FerryMic 时，旧数据目录（如 `%APPDATA%\SoundBridge`）会自动改名为
+`%APPDATA%\FerryMic`，设置与音效库原样保留（设置里指向旧目录内部的音效库位置也会跟着更新）。代码内部的 crate 名、
+`SOUNDBRIDGE_*` 环境变量和音效库里的 `.soundbridge.json` 保持不变。
 
 ### 环境变量（App 与浏览器版通用）
 

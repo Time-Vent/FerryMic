@@ -3,8 +3,8 @@
 //! PulseAudio, with no third-party software.
 //!
 //! ```text
-//! SoundBridge 输出 ──▶ 虚拟输出 SoundBridge-Mix（null sink）
-//!                         └─ monitor ──▶ 虚拟麦克风 SoundBridge-Microphone（remap source）
+//! FerryMic 输出 ──▶ 虚拟输出 FerryMic-Mix（null sink）
+//!                         └─ monitor ──▶ 虚拟麦克风 FerryMic-Microphone（remap source）
 //!                                              └─▶ 游戏 / Discord 里选它当麦克风
 //! ```
 //!
@@ -32,7 +32,7 @@ pub const SINK_NAME: &str = "soundbridge_mix";
 /// 虚拟麦克风（remap source）名称。Virtual mic (remap source) name.
 pub const SOURCE_NAME: &str = "soundbridge_mic";
 /// 游戏里看到的麦克风名称。The mic name shown in games.
-pub const SOURCE_DESCRIPTION: &str = "SoundBridge-Microphone";
+pub const SOURCE_DESCRIPTION: &str = "FerryMic-Microphone";
 
 /// 虚拟麦克风状态（供设置页显示）。Virtual mic status (for the settings page).
 #[derive(Debug, Clone, Serialize)]
@@ -63,7 +63,7 @@ impl VirtualMic {
                 "load-module",
                 "module-null-sink",
                 &format!("sink_name={SINK_NAME}"),
-                "sink_properties=device.description=SoundBridge-Mix",
+                "sink_properties=device.description=FerryMic-Mix",
             ])?;
             modules.extend(parse_module_id(&sink));
             let source = pactl(&[
@@ -166,8 +166,8 @@ mod tests {
     fn finds_leftover_modules() {
         let list = "\
 22\tmodule-always-sink\t\t
-536870914\tmodule-remap-source\tmaster=soundbridge_mix.monitor source_name=soundbridge_mic source_properties=device.description=SoundBridge-Microphone\t
-536870913\tmodule-null-sink\tsink_name=soundbridge_mix sink_properties=device.description=SoundBridge-Mix\t
+536870914\tmodule-remap-source\tmaster=soundbridge_mix.monitor source_name=soundbridge_mic source_properties=device.description=FerryMic-Microphone\t
+536870913\tmodule-null-sink\tsink_name=soundbridge_mix sink_properties=device.description=FerryMic-Mix\t
 30\tmodule-null-sink\tsink_name=other\t";
         assert_eq!(find_our_modules(list), vec![536870913, 536870914]);
         assert!(find_our_modules("").is_empty());

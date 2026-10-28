@@ -3,10 +3,10 @@ name = "soundbridge-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "SoundBridge 桌面 App（Tauri 外壳）。SoundBridge desktop app (Tauri shell)."
+description = "FerryMic 桌面 App（Tauri 外壳）。FerryMic desktop app (Tauri shell)."
 
 [[bin]]
-name = "SoundBridge"
+name = "FerryMic"
 path = "src/main.rs"
 
 [build-dependencies]

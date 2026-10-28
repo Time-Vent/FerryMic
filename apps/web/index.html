@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
-    <title>SoundBridge</title>
+    <title>FerryMic</title>
     <script>
       // 尽早套用上次的主题，避免启动时闪一下默认配色。
       // Apply the last theme as early as possible to avoid a flash of the default colours.
@@ -20,7 +20,7 @@
     <!-- 应用外框：导航栏 + 文件夹栏 + 主区域。App shell: rail + folder sidebar + main. -->
     <div class="app">
       <nav class="rail" aria-label="导航">
-        <div class="brand" data-icon="logo" title="SoundBridge"></div>
+        <div class="brand" data-icon="logo" title="FerryMic"></div>
         <button class="rail-btn active" id="view-library" data-icon="grid" title="音效库" aria-label="音效库"></button>
         <!-- 音效资源：收集免费 / 开放的音效网站。Sound sites: free / open sound websites. -->
         <button class="rail-btn" id="view-sites" data-icon="globe" title="音效资源" aria-label="音效资源"><svg class="note-badge" viewBox="0 0 12 12" aria-hidden="true"><ellipse cx="3.6" cy="9.4" rx="2.1" ry="1.7" /><path d="M5.6 9.2V1.6c0.4 1.8 3.9 2.3 3.9 5" /></svg></button>
@@ -389,8 +389,8 @@
               <h4>Linux <span class="badge-current">当前系统</span></h4>
               <ol class="help-list" data-i18n-html="help-linux">
                 <li>需要 PipeWire（含 pipewire-pulse）或 PulseAudio，以及 <code>pactl</code> 命令（pulseaudio-utils）。</li>
-                <li>SoundBridge 启动时自动创建虚拟麦克风 <code>SoundBridge-Microphone</code>，退出时自动移除。</li>
-                <li>其他软件的麦克风选 <code>SoundBridge-Microphone</code>。</li>
+                <li>FerryMic 启动时自动创建虚拟麦克风 <code>FerryMic-Microphone</code>，退出时自动移除。</li>
+                <li>其他软件的麦克风选 <code>FerryMic-Microphone</code>。</li>
                 <li>全局快捷键需要 X11 会话（Wayland 下请改用 X11 会话，或用界面 / 手机遥控触发）。</li>
               </ol>
             </div>
@@ -407,7 +407,7 @@
 
         <section class="setting-group">
           <h3><span data-icon="info"></span>关于</h3>
-          <p class="setting-value">SoundBridge <span id="app-version"></span></p>
+          <p class="setting-value">FerryMic <span id="app-version"></span></p>
           <small class="hint">设置保存在：<span id="data-dir"></span></small>
         </section>
       </div>
@@ -438,7 +438,7 @@
     <!-- 关闭窗口询问（桌面 App）。Close prompt (desktop app). -->
     <dialog id="close-dialog" class="dialog small">
       <header class="dialog-head">
-        <h2>关闭 SoundBridge？</h2>
+        <h2>关闭 FerryMic？</h2>
       </header>
       <div class="dialog-body">
         <p class="hint">最小化到托盘后，音效、快捷键和手机遥控照常可用，单击托盘图标重新打开。</p>

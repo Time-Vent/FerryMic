@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 构建 SoundBridge 桌面 App（Linux），输出到 dist-app/SoundBridge/。
-# Build the SoundBridge desktop app (Linux) into dist-app/SoundBridge/.
+# 构建 FerryMic 桌面 App（Linux），输出到 dist-app/FerryMic/。
+# Build the FerryMic desktop app (Linux) into dist-app/FerryMic/.
 #
 # 依赖 Dependencies（Debian / Ubuntu 示例 example）：
 #   sudo apt install build-essential pkg-config libasound2-dev libwebkit2gtk-4.1-dev \
@@ -21,8 +21,8 @@ cargo build --release -p soundbridge-app
 
 # 3. 打包目录。Package folder.
 target_dir="${CARGO_TARGET_DIR:-target}"
-out="dist-app/SoundBridge"
+out="dist-app/FerryMic"
 mkdir -p "$out"
-cp "$target_dir/release/SoundBridge" "$out/"
+cp "$target_dir/release/FerryMic" "$out/"
 ls -lh "$out"
-echo "OK -> $out/SoundBridge"
+echo "OK -> $out/FerryMic"

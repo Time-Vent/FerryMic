@@ -1,5 +1,5 @@
-// SoundBridge 前端：文件夹栏 + 音效卡片网格 + 底部麦克风条 + 弹出层 / 对话框 / 设置。
-// SoundBridge front-end: folder sidebar + sound grid + bottom mic bar + popovers /
+// FerryMic 前端：文件夹栏 + 音效卡片网格 + 底部麦克风条 + 弹出层 / 对话框 / 设置。
+// FerryMic front-end: folder sidebar + sound grid + bottom mic bar + popovers /
 // dialogs / settings.
 //
 // 不依赖框架：状态放在模块变量里，音效库变化时重绘文件夹栏与网格；实时状态（播放中、
@@ -1461,7 +1461,7 @@ function setupSettings(): void {
   $('vmic-toggle').addEventListener('change', async (ev) => {
     try {
       renderAppInfo(await api.setSettings({ auto_virtual_mic: (ev.target as HTMLInputElement).checked }));
-      toast(t('重启 SoundBridge 后生效'));
+      toast(t('重启 FerryMic 后生效'));
     } catch (e) {
       toast(errorText(e), 'error');
     }

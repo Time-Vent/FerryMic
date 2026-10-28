@@ -1,5 +1,5 @@
-//! SoundBridge 服务库：音频（音效板 + 麦克风）+ 全局热键 + HTTP API + 内嵌前端。
-//! SoundBridge service library: audio (soundboard + mic) + global hotkeys + HTTP API
+//! FerryMic 服务库：音频（音效板 + 麦克风）+ 全局热键 + HTTP API + 内嵌前端。
+//! FerryMic service library: audio (soundboard + mic) + global hotkeys + HTTP API
 //! + embedded front-end.
 //!
 //! 两个宿主共用：
@@ -184,8 +184,21 @@ pub struct ServerInfo {
 /// The future holds audio stream handles (not `Send`); run it with `block_on` on a
 /// dedicated thread.
 pub async fn run(config: ServerConfig, on_ready: impl FnOnce(ServerInfo)) -> anyhow::Result<()> {
+    // 改名迁移：SoundBridge → FerryMic 数据目录。Rename migration of the data directory.
+    let migrated = settings::migrate_legacy_data_dir();
     let data_dir = settings::data_dir();
     let settings = Arc::new(SettingsStore::load_default());
+    if let Some((old, new)) = &migrated {
+        // 音效库若指定在旧目录里，跟着换到新目录。A library set inside the old directory
+        // follows it to the new one.
+        settings.update(|s| {
+            if let Some(dir) = &s.library_dir {
+                if let Some(p) = settings::rebase_path(dir, old, new) {
+                    s.library_dir = Some(p);
+                }
+            }
+        });
+    }
     let saved = settings.get();
     i18n::apply(&saved.language);
 
@@ -321,7 +334,7 @@ pub async fn run(config: ServerConfig, on_ready: impl FnOnce(ServerInfo)) -> any
     }
 
     let local_url = format!("http://127.0.0.1:{port}");
-    log::info!("SoundBridge 已启动 listening on {local_url}");
+    log::info!("FerryMic 已启动 listening on {local_url}");
     on_ready(ServerInfo {
         port,
         local_url,

@@ -1,4 +1,4 @@
-# SoundBridge 移动端（占位）
+# FerryMic 移动端（占位）
 
 > 本目录为 **Flutter 工程占位**，不参与 `cargo build --workspace`。
 

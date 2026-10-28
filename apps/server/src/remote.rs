@@ -193,10 +193,10 @@ async fn require_token(
             Html(tr!(
                 "<meta name=viewport content='width=device-width'>\
                  <body style='font-family:system-ui;padding:24px;background:#0d0e12;color:#eceef3'>\
-                 <h3>需要访问码</h3><p>请在电脑上的 SoundBridge 里打开「手机遥控」，用手机扫描二维码。</p>",
+                 <h3>需要访问码</h3><p>请在电脑上的 FerryMic 里打开「手机遥控」，用手机扫描二维码。</p>",
                 "<meta name=viewport content='width=device-width'>\
                  <body style='font-family:system-ui;padding:24px;background:#0d0e12;color:#eceef3'>\
-                 <h3>Access code required</h3><p>Turn on \"Phone remote\" in SoundBridge on the computer \
+                 <h3>Access code required</h3><p>Turn on \"Phone remote\" in FerryMic on the computer \
                  and scan the QR code with your phone.</p>"
             )),
         )

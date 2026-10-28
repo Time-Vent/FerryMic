@@ -1,4 +1,4 @@
-# SoundBridge 代码走读（学习用）
+# FerryMic 代码走读（学习用）
 
 > 本文档逐个解释各 crate、模块、结构体、trait 与关键函数的用途，便于学习理解。
 > 每个条目给出：它在哪、它是什么、它为什么这样设计、关键方法怎么用。
@@ -519,7 +519,7 @@ loop {
   饱和度很低的像素（白色图案）不动；钩子在后台线程触发，图标在主线程（`run_on_main_thread`）设置。
 - `#![windows_subsystem = "windows"]`：发布版不弹控制台。
 - 构建：Windows 用 `build-app.ps1`（前端 → `cargo build --release -p soundbridge-app` → 复制 exe 与
-  `WebView2Loader.dll` 到 `dist-app/SoundBridge/`）；Linux 用 `build-app.sh`（同样流程，产物为单个可执行文件）。
+  `WebView2Loader.dll` 到 `dist-app/FerryMic/`）；Linux 用 `build-app.sh`（同样流程，产物为单个可执行文件）。
 
 ---
 

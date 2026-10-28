@@ -1,5 +1,5 @@
-//! SoundBridge 桌面 App：Tauri 外壳 + 进程内的 SoundBridge 服务。
-//! SoundBridge desktop app: Tauri shell + the SoundBridge service in-process.
+//! FerryMic 桌面 App：Tauri 外壳 + 进程内的 FerryMic 服务。
+//! FerryMic desktop app: Tauri shell + the FerryMic service in-process.
 //!
 //! 启动流程：
 //! Start-up:
@@ -117,7 +117,7 @@ fn main() {
                 }
             };
             WebviewWindowBuilder::new(app, MAIN, url)
-                .title("SoundBridge")
+                .title("FerryMic")
                 .inner_size(1080.0, 700.0)
                 .min_inner_size(760.0, 520.0)
                 .center()
@@ -140,6 +140,11 @@ fn main() {
             let WindowEvent::CloseRequested { api, .. } = event else {
                 return;
             };
+            // 只管主窗口；音效资源预览窗口直接关闭。Only the main window; the sound-site
+            // preview window just closes.
+            if window.label() != MAIN {
+                return;
+            }
             let app = window.app_handle();
             let Some(control) = app.try_state::<Control>() else {
                 return; // 服务没起来：直接关闭。Service never started: just close.
@@ -188,7 +193,7 @@ fn hide_main(app: &AppHandle) {
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     TrayIconBuilder::with_id(TRAY)
         .icon(base_icon())
-        .tooltip("SoundBridge")
+        .tooltip("FerryMic")
         .menu(&tray_menu(app)?)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -216,9 +221,9 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 fn open_browse_window(app: &AppHandle, url: &str, title: &str) -> Result<(), String> {
     let parsed: tauri::Url = url.parse().map_err(|e| format!("{e}"))?;
     let title = if title.is_empty() {
-        "SoundBridge".to_string()
+        "FerryMic".to_string()
     } else {
-        format!("{title} - SoundBridge")
+        format!("{title} - FerryMic")
     };
     // 已打开：换网址并提到前台。Already open: navigate and bring to front.
     if let Some(w) = app.get_webview_window(BROWSE) {
@@ -301,9 +306,9 @@ fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
 fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let en = soundbridge_server::i18n::is_en();
     let open_text = if en {
-        "Open SoundBridge"
+        "Open FerryMic"
     } else {
-        "打开 SoundBridge"
+        "打开 FerryMic"
     };
     let quit_text = if en { "Quit" } else { "退出" };
     let open = MenuItem::with_id(app, "open", open_text, true, None::<&str>)?;

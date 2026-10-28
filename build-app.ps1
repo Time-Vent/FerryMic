@@ -1,5 +1,5 @@
-﻿# 构建 SoundBridge 桌面 App，输出到 dist-app\SoundBridge\（双击 SoundBridge.exe 即可运行）。
-# Build the SoundBridge desktop app into dist-app\SoundBridge\ (double-click SoundBridge.exe).
+﻿# 构建 FerryMic 桌面 App，输出到 dist-app\FerryMic\（双击 FerryMic.exe 即可运行）。
+# Build the FerryMic desktop app into dist-app\FerryMic\ (double-click FerryMic.exe).
 #
 # 步骤 Steps: 前端构建 build front-end -> cargo release 编译 App -> 复制 exe + WebView2Loader.dll
 # 用法 Usage:  powershell -ExecutionPolicy Bypass -File .\build-app.ps1
@@ -23,9 +23,9 @@ if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 
 # 3. 打包目录：GNU 工具链构建的 App 需要 WebView2Loader.dll 放在 exe 旁边。
 #    Package folder: a GNU-built app needs WebView2Loader.dll next to the exe.
-$out = Join-Path $PSScriptRoot "dist-app\SoundBridge"
+$out = Join-Path $PSScriptRoot "dist-app\FerryMic"
 New-Item -ItemType Directory -Force $out | Out-Null
-Copy-Item "$env:CARGO_TARGET_DIR\release\SoundBridge.exe" $out -Force
+Copy-Item "$env:CARGO_TARGET_DIR\release\FerryMic.exe" $out -Force
 Copy-Item "$env:CARGO_TARGET_DIR\release\WebView2Loader.dll" $out -Force
 Get-ChildItem $out | Select-Object Name, @{n = "MB"; e = { [math]::Round($_.Length / 1MB, 2) } }
 Write-Host "OK -> $out"

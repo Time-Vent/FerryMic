@@ -16,9 +16,9 @@ use crate::library::SoundDefaults;
 /// 数据目录（存放 `settings.json`，以及默认的音效库 `sounds/`）。
 /// The data directory (holds `settings.json` and the default sound library `sounds/`).
 ///
-/// - Windows：`%APPDATA%\SoundBridge`
-/// - Linux：`$XDG_DATA_HOME/SoundBridge`，默认 `~/.local/share/SoundBridge`
-/// - macOS：`~/Library/Application Support/SoundBridge`
+/// - Windows：`%APPDATA%\FerryMic`
+/// - Linux：`$XDG_DATA_HOME/FerryMic`，默认 `~/.local/share/FerryMic`
+/// - macOS：`~/Library/Application Support/FerryMic`
 ///
 /// 可用环境变量 `SOUNDBRIDGE_DATA_DIR` 覆盖（测试用）。
 /// Overridable with `SOUNDBRIDGE_DATA_DIR` (for tests).
@@ -26,6 +26,11 @@ pub fn data_dir() -> PathBuf {
     if let Some(p) = std::env::var_os("SOUNDBRIDGE_DATA_DIR") {
         return PathBuf::from(p);
     }
+    data_base().join("FerryMic")
+}
+
+/// 各平台存放应用数据的上级目录。The per-platform parent of app data directories.
+fn data_base() -> PathBuf {
     let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
     let base = if cfg!(windows) {
         env("APPDATA")
@@ -35,7 +40,50 @@ pub fn data_dir() -> PathBuf {
         env("XDG_DATA_HOME").or_else(|| env("HOME").map(|h| h.join(".local").join("share")))
     };
     base.unwrap_or_else(|| PathBuf::from("."))
-        .join("SoundBridge")
+}
+
+/// 改名前的数据目录名。The data directory name before the rename.
+const LEGACY_DIR_NAME: &str = "SoundBridge";
+
+/// 改名迁移：旧数据目录（`SoundBridge`）存在、新目录（`FerryMic`）还没有时，整个改名过去
+/// （设置、默认音效库都在里面）。返回（旧, 新）路径，供调整设置里指向旧目录的路径。
+/// 用 `SOUNDBRIDGE_DATA_DIR` 指定目录时不迁移。
+/// Rename migration: when the old data directory (`SoundBridge`) exists and the new one
+/// (`FerryMic`) doesn't, rename it over (settings and the default library live inside).
+/// Returns (old, new) so settings pointing into the old directory can be fixed. No
+/// migration when `SOUNDBRIDGE_DATA_DIR` is set.
+pub fn migrate_legacy_data_dir() -> Option<(PathBuf, PathBuf)> {
+    if std::env::var_os("SOUNDBRIDGE_DATA_DIR").is_some() {
+        return None;
+    }
+    let old = data_base().join(LEGACY_DIR_NAME);
+    let new = data_dir();
+    if !old.is_dir() || new.exists() {
+        return None;
+    }
+    match std::fs::rename(&old, &new) {
+        Ok(()) => {
+            log::info!(
+                "数据目录已迁移 data dir migrated: {} -> {}",
+                old.display(),
+                new.display()
+            );
+            Some((old, new))
+        }
+        Err(e) => {
+            log::warn!("数据目录迁移失败 data dir migration failed: {e}");
+            None
+        }
+    }
+}
+
+/// 把指向旧目录内部的路径换到新目录。Re-point a path inside the old directory to the new one.
+pub fn rebase_path(
+    path: &std::path::Path,
+    old: &std::path::Path,
+    new: &std::path::Path,
+) -> Option<PathBuf> {
+    path.strip_prefix(old).ok().map(|rest| new.join(rest))
 }
 
 /// 外观模式。Appearance mode.
@@ -238,6 +286,19 @@ fn default_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rebases_paths_inside_the_old_dir_only() {
+        let (old, new) = (
+            PathBuf::from("/data/SoundBridge"),
+            PathBuf::from("/data/FerryMic"),
+        );
+        assert_eq!(
+            rebase_path(&old.join("sounds"), &old, &new),
+            Some(new.join("sounds"))
+        );
+        assert_eq!(rebase_path(&PathBuf::from("/music/sfx"), &old, &new), None);
+    }
 
     #[test]
     fn web_urls_only() {

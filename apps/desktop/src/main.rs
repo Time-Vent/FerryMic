@@ -1,5 +1,5 @@
-//! SoundBridge 桌面 CLI 演示壳。
-//! SoundBridge desktop CLI demo shell.
+//! FerryMic 桌面 CLI 演示壳。
+//! FerryMic desktop CLI demo shell.
 //!
 //! 第一阶段：无 GUI 的命令行壳，验证「文件(变速) + 麦克风 → 混音 → 声卡输出」
 //! 端到端链路，并提供「离线渲染」以便不依赖硬件即可听到处理结果。
@@ -233,7 +233,7 @@ fn list_devices() -> Result<()> {
 /// 打印用法。Print usage.
 fn print_usage() {
     println!(
-        "SoundBridge 桌面演示 Desktop demo\n\
+        "FerryMic 桌面演示 Desktop demo\n\
          用法 Usage:\n\
          \x20 soundbridge --list                              列出设备 list devices\n\
          \x20 soundbridge <in.wav> --render <out.wav> [--speed 1.5] [--file-gain 0]\n\

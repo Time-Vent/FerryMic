@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SoundBridge",
+  "productName": "FerryMic",
   "version": "0.1.0",
-  "identifier": "com.soundbridge.app",
+  "identifier": "com.ferrymic.app",
   "build": {
     "frontendDist": "loading"
   },

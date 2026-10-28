@@ -28,7 +28,7 @@
 filter-chain），PulseAudio module-pipe-source 兜底。
 
 > **已实现（简化路径）**：`apps/server/src/virtual_mic.rs` 通过 `pactl` 加载
-> `module-null-sink`（`soundbridge_mix`）+ `module-remap-source`（`SoundBridge-Microphone`），
+> `module-null-sink`（`soundbridge_mix`）+ `module-remap-source`（`FerryMic-Microphone`），
 > PipeWire（pipewire-pulse）与 PulseAudio 通用；本进程经 `PULSE_SINK` / `PIPEWIRE_NODE` 环境变量把
 > 播放导入虚拟输出，退出时卸载模块，遗留模块下次启动时接管。尚未在真实 Linux 上实测。
 > 直接使用 PipeWire 原生 API 创建 `Audio/Source` 节点仍可作为后续优化。

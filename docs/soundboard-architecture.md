@@ -5,7 +5,7 @@
 
 ## 1. 定位
 
-音效板是 SoundBridge 的**核心产品形态**：采集真实麦克风，管理多个音效并绑定快捷键，
+音效板是 FerryMic 的**核心产品形态**：采集真实麦克风，管理多个音效并绑定快捷键，
 把「你的声音 + 音效」混在一起输出到声卡 / 虚拟音频线。目标应用（游戏语音、会议、直播）
 把虚拟音频线当麦克风，对方就能同时听到人声和音效。
 
@@ -145,9 +145,9 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
 
 ### 6.3 设置持久化（`settings.rs`）
 
-- 文件：数据目录下的 `settings.json`。数据目录：Windows `%APPDATA%\SoundBridge`、
-  Linux `$XDG_DATA_HOME/SoundBridge`（默认 `~/.local/share/SoundBridge`）、
-  macOS `~/Library/Application Support/SoundBridge`，可用 `SOUNDBRIDGE_DATA_DIR` 覆盖（测试用）。
+- 文件：数据目录下的 `settings.json`。数据目录：Windows `%APPDATA%\FerryMic`、
+  Linux `$XDG_DATA_HOME/FerryMic`（默认 `~/.local/share/FerryMic`）、
+  macOS `~/Library/Application Support/FerryMic`，可用 `SOUNDBRIDGE_DATA_DIR` 覆盖（测试用）。
 - 内容：
   - 设备：`mic_device`（`null` = 自动）、`mic_gain_db`、`output_device`（`null` = 系统默认）；
   - 试听：`monitor_enabled`（默认开）、`monitor_device`（`null` = 系统默认播放设备）、`monitor_gain_db`；
@@ -159,6 +159,8 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
   - 新音效默认设置：`sound_defaults`（`{looping, exclusive, gain_db, speed}`，默认独占、单次、0 dB、1.0×）；
   - 音效资源：`custom_sites`（用户添加的网站 `[{name, url}]`）。
   旧文件缺少的字段自动取默认值。
+- **改名迁移**（`migrate_legacy_data_dir`）：启动时若旧数据目录 `SoundBridge` 存在而 `FerryMic` 不存在，整个改名过去；
+  `library_dir` 指向旧目录内部时用 `rebase_path` 换到新目录。设置了 `SOUNDBRIDGE_DATA_DIR` 时不迁移。
 - 启动时麦克风选择优先级：环境变量 `SOUNDBRIDGE_INPUT_DEVICE` > 上次的选择 > 自动。
   输出：`SOUNDBRIDGE_OUTPUT_DEVICE` > 上次的选择 > 系统默认。
 - 静音状态不保存（由 `SOUNDBRIDGE_MIC_MUTED` 决定启动值）。
@@ -224,7 +226,7 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
 - **单实例**：`tauri-plugin-single-instance`，再次启动只会把已有窗口提到前台，避免两份音频输出。
 - **拖拽导入**：关闭 Tauri 的文件拖放拦截（`disable_drag_drop_handler`），由网页处理 HTML5 拖放。
 - **启动失败**：显示内置的错误页（`apps/app/loading/index.html`），错误信息经查询参数传入。
-- **托盘**：`TrayIconBuilder` 建托盘图标，菜单「打开 SoundBridge / 退出」，左键单击恢复窗口。
+- **托盘**：`TrayIconBuilder` 建托盘图标，菜单「打开 FerryMic / 退出」，左键单击恢复窗口。
 - **关闭询问**：拦截 `CloseRequested`，按设置 `close_action` 处理：
   - `Tray`：隐藏窗口；`Quit`：退出；
   - `Ask`（默认）：`Control::request_close` 置位，界面轮询 `/api/live` 看到 `close_prompt` 后弹出网页内的对话框
@@ -244,7 +246,7 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
 手机**不做音频处理**，只当「遥控器」：
 
 ```
-手机浏览器 ──HTTP/局域网──▶ 电脑上的 SoundBridge ──命令──▶ 音频引擎 ──▶ 声卡/虚拟音频线
+手机浏览器 ──HTTP/局域网──▶ 电脑上的 FerryMic ──命令──▶ 音频引擎 ──▶ 声卡/虚拟音频线
 ```
 
 - **主界面始终只监听 `127.0.0.1`**。手机遥控是**单独的监听**（`0.0.0.0:主端口+1`，被占用时换随机端口），
@@ -291,8 +293,8 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
 ### 11.3 Linux 自动虚拟麦克风（`virtual_mic.rs`）
 
 ```
-SoundBridge 输出 ──▶ 虚拟输出 soundbridge_mix（module-null-sink，描述 SoundBridge-Mix）
-                        └─ monitor ──▶ 虚拟麦克风 soundbridge_mic（module-remap-source，描述 SoundBridge-Microphone）
+FerryMic 输出 ──▶ 虚拟输出 soundbridge_mix（module-null-sink，描述 FerryMic-Mix）
+                        └─ monitor ──▶ 虚拟麦克风 soundbridge_mic（module-remap-source，描述 FerryMic-Microphone）
                                              └─▶ 游戏 / Discord 里选它当麦克风
 ```
 

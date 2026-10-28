@@ -189,7 +189,7 @@ const EN: Record<string, string> = {
   '已创建：其他软件的麦克风选「{source}」': 'Created: pick "{source}" as the mic in other apps',
   '未创建：{note}': 'Not created: {note}',
   '未启用（已选择其它输出设备）': 'Off (another output device is selected)',
-  '重启 SoundBridge 后生效': 'Takes effect after restarting SoundBridge',
+  '重启 FerryMic 后生效': 'Takes effect after restarting FerryMic',
   '试听（自己也听到音效）': 'Monitor (hear the effects yourself)',
   '音效同时在耳机 / 扬声器里播放': 'Also play effects on headphones / speakers',
   不包含你自己的声音: "Doesn't include your own voice",
@@ -280,7 +280,7 @@ const EN: Record<string, string> = {
   '手机遥控：{error}': 'Phone remote: {error}',
 
   // ---- 关闭询问 Close prompt ----
-  '关闭 SoundBridge？': 'Close SoundBridge?',
+  '关闭 FerryMic？': 'Close FerryMic?',
   '最小化到托盘后，音效、快捷键和手机遥控照常可用，单击托盘图标重新打开。':
     'In the tray, sounds, hotkeys and the phone remote keep working; click the tray icon to reopen.',
   '记住我的选择（可在设置 → 窗口里修改）': 'Remember my choice (change it in Settings → Window)',
@@ -307,8 +307,8 @@ const EN_HTML: Record<string, string> = {
     <li>Keep the default playback device in Windows "Sound settings" on your headphones or speakers, not CABLE Input — otherwise everything the computer plays leaks into the mic.</li>`,
   'help-linux': `
     <li>Requires PipeWire (with pipewire-pulse) or PulseAudio, plus the <code>pactl</code> command (pulseaudio-utils).</li>
-    <li>SoundBridge creates the virtual mic <code>SoundBridge-Microphone</code> at start-up and removes it on exit.</li>
-    <li>In other apps, pick <code>SoundBridge-Microphone</code> as the microphone.</li>
+    <li>FerryMic creates the virtual mic <code>FerryMic-Microphone</code> at start-up and removes it on exit.</li>
+    <li>In other apps, pick <code>FerryMic-Microphone</code> as the microphone.</li>
     <li>Global hotkeys need an X11 session (on Wayland, switch to X11, or trigger sounds from the window / phone remote).</li>`,
   'help-macos': `
     <li>Install a virtual audio device such as BlackHole 2ch.</li>
