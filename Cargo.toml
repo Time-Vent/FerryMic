@@ -12,6 +12,7 @@ members = [
     "adapters/audio-cpal",
     "apps/desktop",
     "apps/server",
+    "apps/app",
 ]
 
 [workspace.package]
@@ -48,3 +49,5 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+# 去掉调试符号，减小可执行文件。Strip debug symbols to shrink binaries.
+strip = true

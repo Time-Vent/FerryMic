@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<!-- 启动失败时显示的页面（正常情况下窗口直接加载本机服务）。
+     Page shown when start-up fails (normally the window loads the local service). -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SoundBridge</title>
+    <style>
+      body {
+        margin: 0;
+        height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #0d0e12;
+        color: #eceef3;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+      }
+      .box {
+        max-width: 520px;
+        padding: 28px;
+        border-radius: 16px;
+        background: #14161b;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+      p {
+        margin: 0;
+        color: #8d94a3;
+        line-height: 1.6;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h1>SoundBridge 启动失败</h1>
+      <p id="msg">正在启动…</p>
+    </div>
+    <script>
+      // 错误信息由外壳经查询参数传入。The shell passes the error via the query string.
+      const err = new URLSearchParams(location.search).get('error');
+      if (err) document.getElementById('msg').textContent = err;
+    </script>
+  </body>
+</html>

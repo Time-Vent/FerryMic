@@ -59,11 +59,7 @@ fn decode_with_symphonia(path: &Path) -> Result<DecodedAudio, SourceError> {
         .ok_or_else(|| SourceError::Decode("无音频轨道 no audio track".into()))?;
     let track_id = track.id;
     let sample_rate = track.codec_params.sample_rate.unwrap_or(48_000);
-    let channels = track
-        .codec_params
-        .channels
-        .map(|c| c.count())
-        .unwrap_or(1);
+    let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(1);
 
     // 创建解码器。Create the decoder.
     let mut decoder = symphonia::default::get_codecs()
@@ -73,12 +69,9 @@ fn decode_with_symphonia(path: &Path) -> Result<DecodedAudio, SourceError> {
     let mut samples: Vec<f32> = Vec::new();
     let mut sample_buf: Option<SampleBuffer<f32>> = None;
 
-    // 循环读包并解码。Loop over packets and decode.
-    loop {
-        let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(_) => break, // 到达文件末尾。Reached end of file.
-        };
+    // 循环读包并解码，读包出错即到达文件末尾。
+    // Loop over packets and decode; a read error means end of file.
+    while let Ok(packet) = format.next_packet() {
         if packet.track_id() != track_id {
             continue;
         }
@@ -102,7 +95,9 @@ fn decode_with_symphonia(path: &Path) -> Result<DecodedAudio, SourceError> {
     }
 
     if samples.is_empty() {
-        return Err(SourceError::Decode("未解码到任何样本 decoded no samples".into()));
+        return Err(SourceError::Decode(
+            "未解码到任何样本 decoded no samples".into(),
+        ));
     }
 
     Ok(DecodedAudio {

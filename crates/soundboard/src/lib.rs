@@ -10,22 +10,33 @@
 //! (gaming, meetings, streaming).
 //!
 //! 实时安全约束：`SoundBoard` 由**单个实时线程**独占访问（`fill` / `apply_command`
-//! 都在回调线程内）。控制侧（WebSocket / 全局热键）通过命令队列投递
-//! [`BoardCommand`]，实时线程消费。`fill` 不分配、不加锁。
+//! 都在回调线程内）。控制侧（Web API / 全局热键）通过命令队列投递
+//! [`BoardCommand`]，实时线程消费。文件解码在控制侧完成（[`LoadedSound::load`]），
+//! 实时侧触发音效只克隆共享 PCM（引用计数），不做 IO、不解码、不分配。
 //! Real-time constraint: `SoundBoard` is exclusively accessed by a **single
 //! real-time thread** (`fill` / `apply_command` both run on the callback thread).
-//! The control side (WebSocket / global hotkey) pushes [`BoardCommand`] through a
-//! queue consumed by the real-time thread. `fill` allocates and locks nothing.
+//! The control side (web API / global hotkey) pushes [`BoardCommand`] through a
+//! queue consumed by the real-time thread. Files are decoded on the control side
+//! ([`LoadedSound::load`]); triggering on the real-time side only clones the shared
+//! PCM (a refcount bump) — no IO, no decoding, no allocation.
 
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
 
-use audio_source::{VariableRateSource, VarispeedSource};
+use audio_source::{SourceError, VariableRateSource, VarispeedSource};
 use serde::{Deserialize, Serialize};
 
 /// 音效唯一标识。Sound unique identifier.
 pub type SoundId = u32;
+
+/// 同时播放的实例上限（预分配，满了替换最早的实例）。
+/// Max simultaneous instances (pre-allocated; when full, the oldest is replaced).
+pub const MAX_INSTANCES: usize = 32;
+
+/// 预留的音效定义容量，避免 `AddSound` 时哈希表扩容。
+/// Reserved definition capacity, so `AddSound` doesn't grow the hash map.
+const RESERVED_SOUNDS: usize = 256;
 
 /// 触发模式（用户可 DIY）。
 /// Trigger mode (user-configurable).
@@ -65,12 +76,51 @@ pub struct SoundSpec {
     pub hotkey: Option<String>,
 }
 
+/// 已解码的音效：定义 + 共享 PCM。在控制侧构造，再交给实时侧。
+/// A decoded sound: definition + shared PCM. Built on the control side, then handed
+/// to the real-time side.
+pub struct LoadedSound {
+    pub spec: SoundSpec,
+    source: VarispeedSource,
+}
+
+impl LoadedSound {
+    /// 解码 `spec.file_path`（WAV/MP3/FLAC/OGG/AAC 等）。会做文件 IO 与解码，
+    /// **不要在实时线程调用**。
+    /// Decode `spec.file_path` (WAV/MP3/FLAC/OGG/AAC etc.). Does file IO and
+    /// decoding — **never call on the real-time thread**.
+    pub fn load(spec: SoundSpec) -> Result<Self, SourceError> {
+        let source = VarispeedSource::from_file(&spec.file_path)?;
+        Ok(Self { spec, source })
+    }
+
+    /// 源文件采样率。Source file sample rate.
+    pub fn sample_rate(&self) -> u32 {
+        self.source.sample_rate()
+    }
+
+    /// 源文件时长（秒）。Source file duration in seconds.
+    pub fn duration_secs(&self) -> f32 {
+        self.source.total_frames() as f32 / self.source.sample_rate().max(1) as f32
+    }
+}
+
+impl std::fmt::Debug for LoadedSound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoadedSound")
+            .field("spec", &self.spec)
+            .field("sample_rate", &self.source.sample_rate())
+            .field("frames", &self.source.total_frames())
+            .finish()
+    }
+}
+
 /// 控制侧 → 实时侧的命令。
 /// Command from control side → real-time side.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum BoardCommand {
-    /// 添加/更新一个音效定义。Add/update a sound definition.
-    AddSound(SoundSpec),
+    /// 添加/更新一个已解码的音效。Add/update a decoded sound.
+    AddSound(Box<LoadedSound>),
     /// 移除一个音效。Remove a sound.
     RemoveSound { sound_id: SoundId },
     /// 触发一个音效（按触发模式启动/停止）。
@@ -85,6 +135,12 @@ pub enum BoardCommand {
     SetGain { sound_id: SoundId, gain_db: f32 },
     /// 设置某音效变速。Set a sound's speed.
     SetSpeed { sound_id: SoundId, speed: f32 },
+    /// 设置某音效的触发模式（会停止它正在播放的实例）。
+    /// Set a sound's trigger mode (stops its playing instances).
+    SetMode {
+        sound_id: SoundId,
+        mode: TriggerMode,
+    },
 }
 
 /// 正在播放的音效实例。
@@ -96,8 +152,11 @@ struct Instance {
     loop_: bool,
     /// 线性增益。Linear gain.
     gain_lin: f32,
-    /// 播放倍速。Playback speed.
+    /// 播放倍速（用户设置）。Playback speed (user setting).
     speed: f32,
+    /// 采样率换算比 = 源采样率 / 输出采样率。
+    /// Sample-rate ratio = source rate / output rate.
+    rate_ratio: f32,
     /// 是否已播放完毕（待移除）。Whether finished (pending removal).
     done: bool,
 }
@@ -107,65 +166,80 @@ struct Instance {
 /// real-time thread.
 pub struct SoundBoard {
     /// 音效定义表（按 id）。Sound definitions by id.
-    sounds: HashMap<SoundId, SoundSpec>,
-    /// 正在播放的实例。Playing instances.
+    sounds: HashMap<SoundId, LoadedSound>,
+    /// 正在播放的实例（容量固定为 `MAX_INSTANCES`）。
+    /// Playing instances (capacity fixed at `MAX_INSTANCES`).
     instances: Vec<Instance>,
     /// 临时混音缓冲（预分配，避免 fill 内分配）。
     /// Scratch mix buffer (pre-allocated to avoid allocation in fill).
     scratch: Vec<f32>,
+    /// 输出采样率。Output sample rate.
+    output_rate: u32,
 }
 
 impl SoundBoard {
-    /// 创建空音效板。`capacity_samples` 为单次 `fill` 的最大样点数（frames × channels）。
-    /// Create an empty board. `capacity_samples` is the max sample count per `fill`.
-    pub fn new(capacity_samples: usize) -> Self {
+    /// 创建空音效板。`capacity_samples` 为 scratch 大小（样点数）；`fill` 请求更多时
+    /// 自动分块处理。`output_rate` 为输出设备采样率。
+    /// Create an empty board. `capacity_samples` sizes the scratch buffer; larger
+    /// `fill` requests are processed in chunks. `output_rate` is the output device rate.
+    pub fn new(capacity_samples: usize, output_rate: u32) -> Self {
         Self {
-            sounds: HashMap::new(),
-            instances: Vec::new(),
-            scratch: vec![0.0; capacity_samples],
+            sounds: HashMap::with_capacity(RESERVED_SOUNDS),
+            instances: Vec::with_capacity(MAX_INSTANCES),
+            scratch: vec![0.0; capacity_samples.max(64)],
+            output_rate: output_rate.max(1),
         }
     }
 
     /// 应用一条命令（实时侧调用）。
     /// Apply one command (real-time side).
-    pub fn apply_command(&mut self, cmd: &BoardCommand) {
+    pub fn apply_command(&mut self, cmd: BoardCommand) {
         match cmd {
-            BoardCommand::AddSound(spec) => {
-                self.sounds.insert(spec.id, spec.clone());
+            BoardCommand::AddSound(sound) => {
+                let id = sound.spec.id;
+                self.sounds.insert(id, *sound);
             }
             BoardCommand::RemoveSound { sound_id } => {
-                self.sounds.remove(sound_id);
-                self.instances.retain(|i| i.sound_id != *sound_id);
+                self.sounds.remove(&sound_id);
+                self.instances.retain(|i| i.sound_id != sound_id);
             }
             BoardCommand::Trigger { sound_id } => {
-                self.trigger(*sound_id);
+                self.trigger(sound_id);
             }
             BoardCommand::Stop { sound_id } => {
-                self.instances.retain(|i| i.sound_id != *sound_id);
+                self.instances.retain(|i| i.sound_id != sound_id);
             }
             BoardCommand::StopAll => {
                 self.instances.clear();
             }
             BoardCommand::SetGain { sound_id, gain_db } => {
-                if let Some(s) = self.sounds.get_mut(sound_id) {
-                    s.gain_db = *gain_db;
+                if let Some(s) = self.sounds.get_mut(&sound_id) {
+                    s.spec.gain_db = gain_db;
                 }
-                let lin = db_to_linear(*gain_db);
+                let lin = db_to_linear(gain_db);
                 for i in &mut self.instances {
-                    if i.sound_id == *sound_id {
+                    if i.sound_id == sound_id {
                         i.gain_lin = lin;
                     }
                 }
             }
             BoardCommand::SetSpeed { sound_id, speed } => {
-                if let Some(s) = self.sounds.get_mut(sound_id) {
-                    s.speed = clamp_speed(*speed);
+                if let Some(s) = self.sounds.get_mut(&sound_id) {
+                    s.spec.speed = clamp_speed(speed);
                 }
                 for i in &mut self.instances {
-                    if i.sound_id == *sound_id {
-                        i.speed = clamp_speed(*speed);
+                    if i.sound_id == sound_id {
+                        i.speed = clamp_speed(speed);
                     }
                 }
+            }
+            BoardCommand::SetMode { sound_id, mode } => {
+                if let Some(s) = self.sounds.get_mut(&sound_id) {
+                    s.spec.trigger_mode = mode;
+                }
+                // 旧实例按旧模式播放（如循环），直接停掉避免语义混乱。
+                // Old instances follow the old mode (e.g. looping); stop them.
+                self.instances.retain(|i| i.sound_id != sound_id);
             }
         }
     }
@@ -173,17 +247,15 @@ impl SoundBoard {
     /// 触发一个音效：根据其触发模式启动/停止实例。
     /// Trigger a sound: start/stop instances per its trigger mode.
     fn trigger(&mut self, sound_id: SoundId) {
-        let Some(spec) = self.sounds.get(&sound_id).cloned() else {
+        let Some(sound) = self.sounds.get(&sound_id) else {
             return; // 未定义的音效。Unknown sound.
         };
+        let mode = sound.spec.trigger_mode;
 
-        match spec.trigger_mode {
-            TriggerMode::OneShot => {
-                // 点按：新建实例从头播，不停止其它。
-                // One-shot: new instance from start, don't stop others.
-                if let Some(inst) = self.make_instance(&spec) {
-                    self.instances.push(inst);
-                }
+        match mode {
+            TriggerMode::OneShot | TriggerMode::Overlap => {
+                // 点按 / 叠加：新建实例从头播，不停止其它。
+                // One-shot / overlap: new instance from start, don't stop others.
             }
             TriggerMode::Loop => {
                 // 循环：已有循环实例则停止，否则新建循环实例。
@@ -194,48 +266,31 @@ impl SoundBoard {
                     .any(|i| i.sound_id == sound_id && i.loop_);
                 if already {
                     self.instances.retain(|i| i.sound_id != sound_id);
-                } else if let Some(inst) = self.make_instance(&spec) {
-                    self.instances.push(inst);
+                    return;
                 }
             }
             TriggerMode::Exclusive => {
-                // 独占：停止所有其它实例，新建实例。
-                // Exclusive: stop all others, create a new instance.
+                // 独占：停止所有其它实例。Exclusive: stop all others.
                 self.instances.clear();
-                if let Some(inst) = self.make_instance(&spec) {
-                    self.instances.push(inst);
-                }
-            }
-            TriggerMode::Overlap => {
-                // 叠加：直接新建实例，可与其它音效同时播放。
-                // Overlap: just create a new instance, can play with others.
-                if let Some(inst) = self.make_instance(&spec) {
-                    self.instances.push(inst);
-                }
             }
         }
-    }
 
-    /// 从一个定义创建播放实例（解码文件；失败返回 None）。
-    /// Create a playing instance from a spec (decode file; None on failure).
-    fn make_instance(&self, spec: &SoundSpec) -> Option<Instance> {
-        // 支持 WAV/MP3/FLAC/OGG/AAC 等多格式。
-        // Support WAV/MP3/FLAC/OGG/AAC etc.
-        let source = match VarispeedSource::from_file(&spec.file_path) {
-            Ok(s) => s,
-            Err(e) => {
-                log::warn!("加载音效失败 failed to load sound {}: {e}", spec.file_path.display());
-                return None;
-            }
-        };
-        Some(Instance {
-            sound_id: spec.id,
-            source,
-            loop_: spec.trigger_mode == TriggerMode::Loop,
-            gain_lin: db_to_linear(spec.gain_db),
-            speed: clamp_speed(spec.speed),
+        let inst = Instance {
+            sound_id,
+            // 只克隆 Arc，不复制 PCM、不分配。Arc clone only — no copy, no alloc.
+            source: sound.source.clone(),
+            loop_: mode == TriggerMode::Loop,
+            gain_lin: db_to_linear(sound.spec.gain_db),
+            speed: clamp_speed(sound.spec.speed),
+            rate_ratio: sound.source.sample_rate().max(1) as f32 / self.output_rate as f32,
             done: false,
-        })
+        };
+
+        // 容量已满：替换最早的实例（不扩容）。Full: replace the oldest (no growth).
+        if self.instances.len() == MAX_INSTANCES {
+            self.instances.remove(0);
+        }
+        self.instances.push(inst);
     }
 
     /// 当前播放中的实例数。Number of playing instances.
@@ -248,40 +303,57 @@ impl SoundBoard {
         self.sounds.len()
     }
 
-    /// 混音：把所有实例的 PCM 按各自增益相加，软限幅后写入 `out`。
-    /// Mix: sum all instances' PCM by their gain, soft-limit, write to `out`.
+    /// 依次回调每个播放实例的音效 id（同一音效可能出现多次）。不分配，可在实时线程调用。
+    /// Call `f` with the sound id of every playing instance (a sound may appear more
+    /// than once). Allocation-free; safe on the real-time thread.
+    pub fn for_each_playing(&self, mut f: impl FnMut(SoundId)) {
+        for i in &self.instances {
+            f(i.sound_id);
+        }
+    }
+
+    /// 混音：把所有实例的 PCM 按各自增益相加后写入 `out`（覆盖原内容）。
+    /// Mix: sum all instances' PCM by their gain and write to `out` (overwrites).
     ///
     /// `channels` 为输出声道数；实例的源声道会被转换到 `channels`。
     /// `channels` is the output channel count; each instance's source channels are
     /// converted to `channels`.
     pub fn fill(&mut self, out: &mut [f32], frames: usize, channels: usize) {
-        let n = frames * channels;
-        debug_assert!(n <= self.scratch.len());
+        let frames = frames.min(out.len() / channels.max(1));
 
         // 清空输出。Clear output.
         for s in out.iter_mut() {
             *s = 0.0;
         }
 
-        // 逐实例混音。Mix each instance.
+        // 逐实例混音；scratch 不够大时分块。Mix each instance, chunked by scratch size.
         let mut idx = 0;
         while idx < self.instances.len() {
-            // 在借用作用域内填充实例并取出所需值（避免与 self 的其它字段借用冲突）。
-            // Fill the instance and extract needed values within a borrow scope
-            // (avoids conflicting borrows with other `self` fields).
-            let (src_ch, written, gain_lin, done) = {
-                let inst = &mut self.instances[idx];
-                let src_ch = inst.source.channels().max(1);
-                let written = Self::fill_instance(&mut self.scratch, inst, frames, src_ch);
-                (src_ch, written, inst.gain_lin, inst.done)
-            };
+            let inst = &mut self.instances[idx];
+            let src_ch = inst.source.channels().max(1);
+            let chunk_frames = self.scratch.len() / src_ch;
+            if chunk_frames == 0 {
+                // 声道数超出 scratch，无法处理。Too many channels for scratch.
+                inst.done = true;
+            }
 
-            // 声道转换并累加（scratch → out）。
-            // Channel-convert and accumulate (scratch → out).
-            Self::accumulate(&self.scratch, src_ch, channels, written, gain_lin, out);
+            let mut pos = 0;
+            while pos < frames && !inst.done {
+                let n = chunk_frames.min(frames - pos);
+                let written = Self::fill_instance(&mut self.scratch, inst, n, src_ch);
+                Self::accumulate(
+                    &self.scratch,
+                    src_ch,
+                    channels,
+                    written,
+                    inst.gain_lin,
+                    &mut out[pos * channels..],
+                );
+                pos += n;
+            }
 
             // 移除已结束的实例。Remove finished instances.
-            if done {
+            if inst.done {
                 self.instances.swap_remove(idx);
             } else {
                 idx += 1;
@@ -291,16 +363,15 @@ impl SoundBoard {
 
     /// 填充单个实例（到 scratch），处理循环与结束标记。
     /// Fill a single instance (into scratch), handle looping and done flag.
-    ///
-    /// 关联函数（不借 `self`），使调用方可同时借用 `instances` 与 `scratch` 两个字段。
-    /// Associated function (doesn't borrow `self`), so the caller can borrow both
-    /// `instances` and `scratch` fields simultaneously.
     fn fill_instance(
         scratch: &mut [f32],
         inst: &mut Instance,
         frames: usize,
         src_ch: usize,
     ) -> usize {
+        // 实际步进 = 用户倍速 × 采样率换算比（44.1k 文件在 48k 输出上不再变调）。
+        // Step = user speed × rate ratio (a 44.1k file no longer shifts pitch at 48k).
+        let step = inst.speed * inst.rate_ratio;
         let mut written = 0usize;
         while written < frames && !inst.done {
             let remaining = frames - written;
@@ -308,7 +379,7 @@ impl SoundBoard {
             let n = inst.source.fill(
                 &mut scratch[seg_start..seg_start + remaining * src_ch],
                 remaining,
-                inst.speed,
+                step,
             );
             written += n;
 
@@ -336,8 +407,6 @@ impl SoundBoard {
 
     /// 把 scratch 中该实例的输出（src_ch 声道）累加到 out（dst_ch 声道）。
     /// Accumulate this instance's output (src_ch) into out (dst_ch).
-    ///
-    /// 关联函数（不借 `self`）。Associated function (doesn't borrow `self`).
     fn accumulate(
         scratch: &[f32],
         src_ch: usize,
@@ -359,7 +428,7 @@ impl SoundBoard {
 
 impl Default for SoundBoard {
     fn default() -> Self {
-        Self::new(48_000 * 2)
+        Self::new(48_000 * 2, 48_000)
     }
 }
 
@@ -386,18 +455,23 @@ fn clamp_speed(speed: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
-    fn spec(id: SoundId, mode: TriggerMode) -> SoundSpec {
+    fn spec(id: SoundId, path: PathBuf, mode: TriggerMode) -> SoundSpec {
         SoundSpec {
             id,
             name: format!("s{id}"),
-            file_path: PathBuf::from("nonexistent.wav"),
+            file_path: path,
             trigger_mode: mode,
             gain_db: 0.0,
             speed: 1.0,
             hotkey: None,
         }
+    }
+
+    fn add(board: &mut SoundBoard, id: SoundId, path: &Path, mode: TriggerMode) {
+        let loaded = LoadedSound::load(spec(id, path.to_path_buf(), mode)).unwrap();
+        board.apply_command(BoardCommand::AddSound(Box::new(loaded)));
     }
 
     #[test]
@@ -414,24 +488,25 @@ mod tests {
     }
 
     #[test]
-    fn trigger_unknown_sound_is_noop() {
-        let mut board = SoundBoard::new(8);
-        board.apply_command(&BoardCommand::Trigger { sound_id: 999 });
-        assert_eq!(board.instance_count(), 0);
+    fn load_missing_file_is_error() {
+        let r = LoadedSound::load(spec(
+            1,
+            PathBuf::from("nonexistent.wav"),
+            TriggerMode::OneShot,
+        ));
+        assert!(r.is_err());
     }
 
     #[test]
-    fn stop_all_clears_instances() {
-        let mut board = SoundBoard::new(8);
-        // 添加一个定义（文件不存在，make_instance 会失败，但 StopAll 仍应清空）。
-        board.apply_command(&BoardCommand::AddSound(spec(1, TriggerMode::OneShot)));
-        board.apply_command(&BoardCommand::StopAll);
+    fn trigger_unknown_sound_is_noop() {
+        let mut board = SoundBoard::new(8, 48_000);
+        board.apply_command(BoardCommand::Trigger { sound_id: 999 });
         assert_eq!(board.instance_count(), 0);
     }
 
     #[test]
     fn fill_empty_board_outputs_silence() {
-        let mut board = SoundBoard::new(8);
+        let mut board = SoundBoard::new(8, 48_000);
         let mut out = [0.5f32; 4];
         board.fill(&mut out, 2, 2);
         assert_eq!(out, [0.0; 4]);
@@ -439,44 +514,41 @@ mod tests {
 
     /// 生成一个含正弦波的临时 WAV，返回路径。
     /// Generate a temp WAV containing a sine wave; returns its path.
-    fn make_test_wav(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    fn make_test_wav(dir: &Path, name: &str, sample_rate: u32, frames: usize) -> PathBuf {
         let path = dir.join(name);
         let spec = hound::WavSpec {
             channels: 1,
-            sample_rate: 48_000,
+            sample_rate,
             bits_per_sample: 16,
             sample_format: hound::SampleFormat::Int,
         };
         let mut w = hound::WavWriter::create(&path, spec).unwrap();
-        for i in 0..4800 {
-            let s = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48_000.0).sin();
+        for i in 0..frames {
+            let s = (2.0 * std::f32::consts::PI * 440.0 * i as f32 / sample_rate as f32).sin();
             w.write_sample((s * 30000.0) as i16).unwrap();
         }
         w.finalize().unwrap();
         path
     }
 
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     /// 端到端：触发一个真实音效，fill 应产出非零音频。
     /// End-to-end: trigger a real sound; fill should produce non-zero audio.
     #[test]
     fn trigger_real_sound_produces_audio() {
-        let dir = std::env::temp_dir().join("soundboard-test");
-        std::fs::create_dir_all(&dir).unwrap();
-        let wav = make_test_wav(&dir, "sine.wav");
+        let dir = temp_dir("soundboard-test");
+        let wav = make_test_wav(&dir, "sine.wav", 48_000, 4800);
 
-        let mut board = SoundBoard::new(4800);
-        board.apply_command(&BoardCommand::AddSound(SoundSpec {
-            id: 1,
-            name: "sine".into(),
-            file_path: wav,
-            trigger_mode: TriggerMode::OneShot,
-            gain_db: 0.0,
-            speed: 1.0,
-            hotkey: None,
-        }));
+        let mut board = SoundBoard::new(4800, 48_000);
+        add(&mut board, 1, &wav, TriggerMode::OneShot);
 
         // 触发后应有 1 个实例。After trigger, 1 instance.
-        board.apply_command(&BoardCommand::Trigger { sound_id: 1 });
+        board.apply_command(BoardCommand::Trigger { sound_id: 1 });
         assert_eq!(board.instance_count(), 1);
 
         // fill 一帧应输出非零（正弦波非静音）。
@@ -486,7 +558,6 @@ mod tests {
         let peak = out.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
         assert!(peak > 0.01, "预期有声音，实际峰值 peak={peak}");
 
-        // 清理。Cleanup.
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -494,38 +565,113 @@ mod tests {
     /// Exclusive mode: triggering should clear existing instances.
     #[test]
     fn exclusive_trigger_clears_others() {
-        let dir = std::env::temp_dir().join("soundboard-test-excl");
-        std::fs::create_dir_all(&dir).unwrap();
-        let wav1 = make_test_wav(&dir, "a.wav");
-        let wav2 = make_test_wav(&dir, "b.wav");
+        let dir = temp_dir("soundboard-test-excl");
+        let wav1 = make_test_wav(&dir, "a.wav", 48_000, 4800);
+        let wav2 = make_test_wav(&dir, "b.wav", 48_000, 4800);
 
-        let mut board = SoundBoard::new(4800);
-        board.apply_command(&BoardCommand::AddSound(SoundSpec {
-            id: 1,
-            name: "a".into(),
-            file_path: wav1,
-            trigger_mode: TriggerMode::Exclusive,
-            gain_db: 0.0,
-            speed: 1.0,
-            hotkey: None,
-        }));
-        board.apply_command(&BoardCommand::AddSound(SoundSpec {
-            id: 2,
-            name: "b".into(),
-            file_path: wav2,
-            trigger_mode: TriggerMode::Exclusive,
-            gain_db: 0.0,
-            speed: 1.0,
-            hotkey: None,
-        }));
+        let mut board = SoundBoard::new(4800, 48_000);
+        add(&mut board, 1, &wav1, TriggerMode::Exclusive);
+        add(&mut board, 2, &wav2, TriggerMode::Exclusive);
 
-        board.apply_command(&BoardCommand::Trigger { sound_id: 1 });
+        board.apply_command(BoardCommand::Trigger { sound_id: 1 });
         assert_eq!(board.instance_count(), 1);
 
         // 触发第二个独占音效 → 清空第一个。
         // Trigger second exclusive sound → clears the first.
-        board.apply_command(&BoardCommand::Trigger { sound_id: 2 });
+        board.apply_command(BoardCommand::Trigger { sound_id: 2 });
         assert_eq!(board.instance_count(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 改触发模式会停止旧实例，之后按新模式播放；for_each_playing 反映当前实例。
+    /// Changing the mode stops old instances, then plays with the new mode;
+    /// for_each_playing reflects current instances.
+    #[test]
+    fn set_mode_stops_instances_and_applies_new_mode() {
+        let dir = temp_dir("soundboard-test-mode");
+        let wav = make_test_wav(&dir, "s.wav", 48_000, 4800);
+
+        let mut board = SoundBoard::new(4800, 48_000);
+        add(&mut board, 7, &wav, TriggerMode::Loop);
+        board.apply_command(BoardCommand::Trigger { sound_id: 7 });
+        let mut ids = Vec::new();
+        board.for_each_playing(|id| ids.push(id));
+        assert_eq!(ids, vec![7]);
+
+        board.apply_command(BoardCommand::SetMode {
+            sound_id: 7,
+            mode: TriggerMode::Overlap,
+        });
+        assert_eq!(board.instance_count(), 0);
+
+        // 叠加模式：连按两次有两个实例（循环模式下第二次会停止）。
+        // Overlap: two presses give two instances (Loop would stop on the second).
+        board.apply_command(BoardCommand::Trigger { sound_id: 7 });
+        board.apply_command(BoardCommand::Trigger { sound_id: 7 });
+        assert_eq!(board.instance_count(), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 实例数达到上限后，再触发替换最早的实例，不超过上限。
+    /// At the instance cap, further triggers replace the oldest without exceeding it.
+    #[test]
+    fn instance_count_is_capped() {
+        let dir = temp_dir("soundboard-test-cap");
+        let wav = make_test_wav(&dir, "s.wav", 48_000, 4800);
+
+        let mut board = SoundBoard::new(4800, 48_000);
+        add(&mut board, 1, &wav, TriggerMode::Overlap);
+        for _ in 0..MAX_INSTANCES + 5 {
+            board.apply_command(BoardCommand::Trigger { sound_id: 1 });
+        }
+        assert_eq!(board.instance_count(), MAX_INSTANCES);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 44.1k 文件在 48k 输出上应按原时长播放（不变速不变调）。
+    /// A 44.1k file on a 48k output plays at its original duration (no pitch shift).
+    #[test]
+    fn source_rate_is_converted_to_output_rate() {
+        let dir = temp_dir("soundboard-test-rate");
+        // 0.1 秒的 44.1k 文件。A 0.1 s file at 44.1k.
+        let wav = make_test_wav(&dir, "s.wav", 44_100, 4410);
+
+        let mut board = SoundBoard::new(4800, 48_000);
+        add(&mut board, 1, &wav, TriggerMode::OneShot);
+        board.apply_command(BoardCommand::Trigger { sound_id: 1 });
+
+        // 48k 下 0.1 秒 = 4800 帧：4790 帧时仍在播，4810 帧时已结束。
+        // 0.1 s at 48k = 4800 frames: still playing at 4790, finished by 4810.
+        let mut out = vec![0.0f32; 4790];
+        board.fill(&mut out, 4790, 1);
+        assert_eq!(board.instance_count(), 1);
+        let mut out = vec![0.0f32; 20];
+        board.fill(&mut out, 20, 1);
+        assert_eq!(board.instance_count(), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 单次 fill 超过 scratch 容量时分块处理，不越界。
+    /// A fill larger than scratch is processed in chunks without going out of bounds.
+    #[test]
+    fn fill_larger_than_scratch_is_chunked() {
+        let dir = temp_dir("soundboard-test-chunk");
+        let wav = make_test_wav(&dir, "s.wav", 48_000, 4800);
+
+        let mut board = SoundBoard::new(64, 48_000);
+        add(&mut board, 1, &wav, TriggerMode::OneShot);
+        board.apply_command(BoardCommand::Trigger { sound_id: 1 });
+
+        let mut out = vec![0.0f32; 2048 * 2];
+        board.fill(&mut out, 2048, 2);
+        // 最后一帧也应有声音（不是只写了前 64 个样点）。
+        // The tail must have audio too (not just the first 64 samples).
+        let tail_peak = out[4000..].iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+        assert!(tail_peak > 0.01, "tail peak={tail_peak}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

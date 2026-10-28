@@ -15,3 +15,6 @@ apps/web/node_modules/
 .editorconfig
 .idea/
 .vscode/
+
+# 桌面 App 打包输出 Desktop app package output
+/dist-app/

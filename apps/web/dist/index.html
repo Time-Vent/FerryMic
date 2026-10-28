@@ -2,42 +2,171 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>SoundBridge 音效板</title>
-    <script type="module" crossorigin src="/assets/index-C2FFoQga.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BqMxIuCC.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>SoundBridge</title>
+    <script type="module" crossorigin src="/assets/index-Bv2S2ckH.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DSbOAbNk.css">
   </head>
   <body>
-    <header>
-      <h1>SoundBridge 音效板</h1>
-      <span id="conn-status" class="status">连接中…</span>
-    </header>
+    <!-- 应用外框：左侧导航栏 + 主区域。App shell: left rail + main area. -->
+    <div class="app">
+      <nav class="rail" aria-label="导航">
+        <div class="brand" data-icon="logo" title="SoundBridge"></div>
+        <button class="rail-btn active" data-icon="grid" title="音效库" aria-label="音效库"></button>
+        <div class="rail-spacer"></div>
+        <button class="rail-btn" id="open-settings" data-icon="settings" title="设置" aria-label="设置"></button>
+      </nav>
 
-    <main>
-      <!-- 添加音效表单 -->
-      <section class="card" id="add-card">
-        <h2>添加音效</h2>
-        <form id="add-form">
-          <label>名称 <input name="name" required placeholder="如：鼓掌" /></label>
-          <label>文件路径 <input name="file_path" required placeholder="如：C:\sounds\clap.wav" /></label>
-          <label>触发模式
-            <select name="trigger_mode">
-              <option value="OneShot">点按（每次从头播）</option>
-              <option value="Loop">循环（再按停止）</option>
-              <option value="Exclusive">独占（打断其他）</option>
-              <option value="Overlap">叠加（可同时播）</option>
-            </select>
+      <main class="main">
+        <header class="toolbar">
+          <div class="title">
+            <h1>音效库</h1>
+            <span id="sound-count" class="count"></span>
+          </div>
+          <label class="search">
+            <span data-icon="search"></span>
+            <input id="search" type="search" placeholder="搜索音效" autocomplete="off" />
           </label>
-          <label>音量 dB <input name="gain_db" type="number" step="1" value="0" /></label>
-          <label>倍速 <input name="speed" type="number" step="0.1" min="0.1" max="16" value="1" /></label>
-          <label>快捷键（可选）<input name="hotkey" placeholder="如：F1 或 Ctrl+Alt+1" /></label>
-          <button type="submit">添加</button>
-        </form>
-      </section>
+          <div class="toolbar-actions">
+            <button id="stop-all" class="btn ghost" title="停止所有正在播放的音效">
+              <span data-icon="stopAll"></span><span class="btn-label">全部停止</span>
+            </button>
+            <button id="import" class="btn primary">
+              <span data-icon="plus"></span><span class="btn-label">导入音效</span>
+            </button>
+            <button class="icon-btn mobile-only" id="open-settings-mobile" data-icon="settings" aria-label="设置"></button>
+          </div>
+          <input id="file-input" type="file" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac" multiple hidden />
+        </header>
 
-      <!-- 音效列表 -->
-      <section id="sound-list"></section>
-    </main>
+        <section id="grid" class="grid" aria-live="polite"></section>
+
+        <!-- 底部麦克风条。Bottom mic bar. -->
+        <footer class="mixer">
+          <button id="mic-mute" class="mic-toggle" aria-label="麦克风静音"></button>
+          <div class="mic-info">
+            <div class="mic-line">
+              <span id="mic-name" class="mic-name">麦克风</span>
+              <span id="mic-hint" class="mic-hint"></span>
+            </div>
+            <div class="meter"><div id="mic-meter" class="meter-fill"></div></div>
+          </div>
+          <label class="mic-volume" title="麦克风音量">
+            <input id="mic-gain" type="range" min="-30" max="24" step="1" value="0" />
+            <span id="mic-gain-value" class="value">0 dB</span>
+          </label>
+          <div class="output" title="输出设备">
+            <span data-icon="speaker"></span>
+            <span id="output-name">—</span>
+          </div>
+        </footer>
+      </main>
+    </div>
+
+    <!-- 拖入文件时的遮罩。Overlay while dragging files in. -->
+    <div id="drop-overlay" class="drop-overlay" hidden>
+      <div class="drop-card">
+        <span data-icon="upload"></span>
+        <p>松开即可导入音效</p>
+        <small>支持 MP3 / WAV / FLAC / OGG / AAC</small>
+      </div>
+    </div>
+
+    <!-- 编辑音效。Edit sound. -->
+    <dialog id="edit-dialog" class="dialog">
+      <form method="dialog" id="edit-form">
+        <header class="dialog-head">
+          <h2>编辑音效</h2>
+          <button type="button" class="icon-btn" data-close data-icon="close" aria-label="关闭"></button>
+        </header>
+        <div class="dialog-body">
+          <label class="field">
+            <span>名称</span>
+            <input name="name" required maxlength="60" />
+          </label>
+          <div class="field">
+            <span>触发方式</span>
+            <div class="segmented" id="mode-group" role="radiogroup">
+              <button type="button" data-mode="OneShot">点按</button>
+              <button type="button" data-mode="Loop">循环</button>
+              <button type="button" data-mode="Exclusive">独占</button>
+              <button type="button" data-mode="Overlap">叠加</button>
+            </div>
+            <small id="mode-desc" class="hint"></small>
+          </div>
+          <label class="field">
+            <span>音量 <output id="gain-out" class="value"></output></span>
+            <input name="gain_db" type="range" min="-30" max="12" step="1" />
+          </label>
+          <label class="field">
+            <span>倍速 <output id="speed-out" class="value"></output></span>
+            <input name="speed" type="range" min="0.5" max="2" step="0.05" />
+            <small class="hint">变速同时变调，双击滑块恢复 1.0×</small>
+          </label>
+          <div class="field">
+            <span>快捷键</span>
+            <div class="hotkey-row">
+              <button type="button" id="hotkey-rec" class="hotkey-rec"></button>
+              <button type="button" id="hotkey-clear" class="btn ghost small">清除</button>
+            </div>
+            <small class="hint">点击后按下组合键（游戏全屏时也能触发），Esc 取消</small>
+          </div>
+          <p id="edit-file" class="file-line"></p>
+        </div>
+        <footer class="dialog-foot">
+          <button type="button" id="edit-delete" class="btn danger ghost">
+            <span data-icon="trash"></span><span>删除</span>
+          </button>
+          <div class="spacer"></div>
+          <button type="button" class="btn ghost" data-close>取消</button>
+          <button type="submit" class="btn primary">保存</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <!-- 设置。Settings. -->
+    <dialog id="settings-dialog" class="dialog settings">
+      <header class="dialog-head">
+        <h2>设置</h2>
+        <button type="button" class="icon-btn" data-close data-icon="close" aria-label="关闭"></button>
+      </header>
+      <div class="dialog-body">
+        <section class="setting-group">
+          <h3><span data-icon="mic"></span>麦克风</h3>
+          <div class="setting-row">
+            <select id="mic-select" aria-label="麦克风设备"></select>
+            <button type="button" id="mic-refresh" class="icon-btn" data-icon="refresh" title="刷新设备列表" aria-label="刷新"></button>
+          </div>
+          <small id="mic-status" class="hint"></small>
+          <small class="hint">手机 mic 软件、蓝牙耳机连上后会自动出现；设备断开后会自动重连。</small>
+        </section>
+
+        <section class="setting-group">
+          <h3><span data-icon="speaker"></span>输出</h3>
+          <p id="settings-output" class="setting-value"></p>
+          <small class="hint">游戏 / 语音软件里把麦克风设为该虚拟音频线的另一端（如 CABLE Output）。</small>
+        </section>
+
+        <section class="setting-group">
+          <h3><span data-icon="phone"></span>手机遥控</h3>
+          <label class="switch-row">
+            <span>允许同一局域网的手机打开界面触发音效</span>
+            <input id="lan-toggle" type="checkbox" class="switch" />
+          </label>
+          <p id="lan-url" class="setting-value"></p>
+          <small id="lan-note" class="hint"></small>
+        </section>
+
+        <section class="setting-group">
+          <h3><span data-icon="info"></span>关于</h3>
+          <p class="setting-value">SoundBridge <span id="app-version"></span></p>
+          <small class="hint">数据目录：<span id="data-dir"></span></small>
+        </section>
+      </div>
+    </dialog>
+
+    <div id="toasts" class="toasts" aria-live="assertive"></div>
 
   </body>
 </html>

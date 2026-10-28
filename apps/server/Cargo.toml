@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "soundbridge_server"
+path = "src/lib.rs"
+
 [[bin]]
 name = "soundbridge-server"
 path = "src/main.rs"
@@ -14,13 +18,19 @@ audio-cpal = { workspace = true }
 audio-types = { workspace = true }
 platform-api = { workspace = true }
 crossbeam-channel = { workspace = true }
+ringbuf = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 
-axum = "0.7"
+axum = { version = "0.7", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.5", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 global-hotkey = "0.6"
+# 把前端 dist 嵌入可执行文件（App 不依赖工作目录）。Embed the front-end dist into the binary.
+rust-embed = { version = "8", features = ["mime-guess"] }
+
+# Windows：全局热键线程需要 Win32 消息循环。Windows: the hotkey thread needs a Win32 message loop.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

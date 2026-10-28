@@ -38,3 +38,17 @@ Windows 系统声音采集若混写「抓整个系统混音」与「抓指定设
 ## 后果
 
 - 反馈环检测覆盖两条路径，测试在 `tests/audio-quality/feedback/`。
+
+## 已实现：麦克风输入检查（音效板）
+
+音效板的麦克风采集也存在反馈环风险：输出到虚拟音频线时，若麦克风选了同一条线的另一端，
+输出会被录回自身。`apps/server/src/mic.rs` 的 `input_risk(input, output)` 在打开麦克风前
+按设备名检查，**不绑定任何厂商**：
+
+- `FeedbackLoop`：与输出同名，或括号内驱动名相同且是虚拟设备（VB-Cable、VoiceMeeter、
+  VAC、BlackHole 等），或无括号时去掉方向词后同名且是虚拟设备。
+- `SystemLoopback`：立体声混音 / What U Hear / Linux `Monitor of …` 等回录设备，会把游戏等
+  所有正在播放的声音录进麦克风，同样拒绝。
+
+命中时拒绝打开并从设备列表隐藏。这是名称启发式，命名特殊的虚拟线可能漏判；单元测试见
+`mic.rs` 的 `detects_feedback_loop_across_vendors` 等。

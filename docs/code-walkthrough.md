@@ -15,6 +15,9 @@
 8. [application：装配层](#8-application装配层)
 9. [audio-cpal：硬件后端](#9-audio-cpal硬件后端)
 10. [desktop：CLI 壳](#10-desktopcli-壳)
+11. [soundboard：音效板核心](#11-soundboard音效板核心)
+12. [server：音效板服务库](#12-server音效板服务库)
+13. [app：桌面 App（Tauri 外壳）](#13-app桌面-apptauri-外壳)
 
 ---
 
@@ -186,12 +189,22 @@ pub trait VariableRateSource: Send {
 - 线性插值重采样：`phase += speed`，对每个采样做 `interp(phase)`。
 - `interp(idx, ch)`：取 `floor(idx)` 和 `ceil(idx)` 两个样本线性插值；越界返回静音。
 - `underrun_count`：`Arc<AtomicU64>` 跨线程共享，数据耗尽即 +1。
+- **PCM 共享**：`samples` 是 `Arc<[f32]>`，`clone()` 只增加引用计数（不复制、不分配），
+  所以实时线程可以为同一音效创建多个播放实例。
+- `fill` 的 `speed` 是「每个输出帧前进的源帧数」。源与输出采样率不同时，由调用方乘上
+  换算比（见 soundboard 的 `rate_ratio`）。
+- `from_file(path)`：按扩展名选解码器（见 `audio_file.rs`）。
 - **语义**：第一阶段倍速 = varispeed（变速变调，像磁带）。保音高 stretch 留第二阶段。
 
 ### `WavFileSource`（`wav_file.rs`）
 
 - 用 `hound` 读 WAV，统一转 f32 交错缓冲（i16/i32/u8/f32 都处理）。
 - `DecodedAudio`：解码结果（samples + rate + channels + format）。
+
+### `decode_audio_file`（`audio_file.rs`）
+
+- WAV 走 `hound`；MP3/FLAC/OGG/AAC 等走 `symphonia`，统一输出 f32 交错 PCM。
+- 会做文件 IO 与整段解码，**只能在控制侧调用**，不能进实时线程。
 
 ---
 
@@ -272,6 +285,23 @@ pub fn ratio(&self) -> f32;                    // 实时侧只读
 - `to_buffer_size`：`0` → 设备默认缓冲，否则固定帧数。
 - 回调里直接调用户 callback，无额外拷贝。
 
+### 按设备原生配置开流（音效板主程序使用）
+
+```rust
+let out = backend.resolve_output(Some("CABLE Input"))?; // 或 None = 默认设备
+let cfg = out.config();          // 设备原生采样率 / 声道数
+let handle = backend.build_output(out, 512, callback)?;
+```
+
+- `resolve_output(name)` / `resolve_input(name)`：按名称「包含匹配」（不区分大小写）找设备，
+  `None` 用系统默认；返回 `ResolvedDevice`（设备 + 名称 + 原生配置）。
+- **为什么先解析再开流**：WASAPI 共享模式只接受设备的混音格式。先拿到真实采样率，调用方
+  才能据此准备回调状态（音效板的采样率换算、麦克风重采样）。
+- `build_output(dev, buffer_frames, cb)`：`buffer_frames` 只是提示，回调实际收到的帧数可能
+  不同，回调必须能处理任意长度。
+- `build_input(dev, cb, on_error)`：`on_error` 在流出错（如蓝牙耳机断开）时调用，
+  麦克风线程据此发现断开并重连。
+
 ---
 
 ## 10. desktop：CLI 壳
@@ -286,6 +316,139 @@ soundbridge <file.wav> --speed 1.0 --file-gain 0 --mic-gain 0   播放文件+麦
 
 - `main()`：解析参数 → `App::new` → `load_file` → 设增益/速率 → `start` → 等 Ctrl-C → `stop`。
 - `ctrlc`：捕获 Ctrl-C 优雅停机。
+
+---
+
+## 11. soundboard：音效板核心
+
+**位置**：`crates/soundboard/src/lib.rs`
+**定位**：管理音效定义与播放实例，在输出回调里混音。整体设计见
+[音效板架构](soundboard-architecture.md)。
+
+### `LoadedSound`
+
+```rust
+let loaded = LoadedSound::load(spec)?;          // 控制侧：读文件 + 解码
+cmd_tx.send(BoardCommand::AddSound(Box::new(loaded)))?;
+```
+
+- 把「读文件 + 解码」放在控制侧完成，实时线程收到的已经是解码好的 PCM。
+- 加载失败（文件不存在、格式不支持）在这里就返回错误，API 可以直接告诉用户。
+
+### `SoundBoard`
+
+- `new(capacity_samples, output_rate)`：预分配 scratch、实例表（`MAX_INSTANCES`）和定义表。
+- `apply_command(cmd)`：在输出回调里执行命令。`Trigger` 只克隆共享 PCM，不分配。
+- `fill(out, frames, channels)`：覆盖写 `out`。每个实例按 `speed × rate_ratio` 步进；
+  scratch 不够时分块。
+- `fill_instance` / `accumulate`：关联函数（不借 `self`），让调用方可以同时借用
+  `instances` 和 `scratch` 两个字段。
+
+---
+
+## 12. server：音效板服务库
+
+**位置**：`apps/server/src/`（库 `soundbridge_server` + 浏览器版入口 `soundbridge-server`）
+
+| 文件 | 内容 |
+|---|---|
+| `lib.rs` | `ServerConfig`、启动流程 `run()`、监听地址、内嵌前端 `static_handler`、`lan_ip` |
+| `main.rs` | 浏览器版入口：`ServerConfig::from_env()` → `run()` |
+| `api.rs` | `AppState` + 全部 HTTP 处理函数 |
+| `library.rs` | `Library`：音效库持久化、导入文件路径、运行时信息 |
+| `audio.rs` | `start_audio`：解析输出设备、启动麦克风线程、构建输出回调；`MicReader`、`PlayingSet` |
+| `mic.rs` | `MicControl`（原子量参数 + 状态）、麦克风线程、`MicCapture`、`input_risk` |
+| `settings.rs` | `SettingsStore`：读写 `settings.json`；`data_dir()` |
+| `hotkeys.rs` | 全局热键线程（Win32 消息循环 + 绑定请求） |
+
+### 启动顺序（`run`）
+
+1. 读设置（`SettingsStore`）和音效库（`Library::load`）。
+2. 决定初始麦克风：`ServerConfig.input_device` > 上次选择 > 系统默认。
+3. `audio::start_audio(...)`：打开输出设备 → `spawn_mic_thread` → 构建输出回调。
+4. 启动热键线程；逐个解码音效库里的音效交给音频线程并绑定快捷键（失败的标记 `error`）。
+5. 按 `lan_remote` 决定监听 `127.0.0.1` 还是 `0.0.0.0`，绑定端口（App 允许回退随机端口）。
+6. 组装 `AppState`，调用 `on_ready` 通知宿主，开始服务。
+
+**为什么 `run` 返回的 future 不是 `Send`**：它持有音频输出流句柄（cpal 流在部分平台不能跨线程），
+所以宿主要在专用线程上 `block_on`，而不是 `tokio::spawn`。
+
+### `Library`（`library.rs`）
+
+- `load(data_dir)`：读 `library.json`，`next_id` 至少为现有最大 id + 1。
+- `alloc_id` / `insert` / `update` / `remove`：每次修改立即 `save`（临时文件 + 改名）。
+- `remove` 只删除 `sounds/` 目录里的文件（`owns`），按路径添加的外部文件不会被删。
+- `import_path(id, name)`：`sounds/<id>-<sanitize_file_name(name)>`，防止 `../` 等路径穿越。
+
+### `PlayingSet`（`audio.rs`）
+
+- 输出回调每次 `fill` 后调用 `publish(&board)`，把播放实例的音效 id 写进固定的原子槽位，0 表示空。
+- `/api/live` 读取 `ids()`（去重排序）给界面高亮。无锁、不分配，实时安全。
+
+### 热键线程（`hotkeys.rs`）
+
+- `Bindings::bind`：解析 → 检查是否被其它音效占用 → 注册新键 → 注销旧键 → 更新表。
+- `pump_messages`：Windows 上分发 `WM_HOTKEY`，没有它热键不会触发；其它平台为空函数。
+
+### `MicControl`（`mic.rs`）
+
+- `gain_db` / `muted` / `level`：原子量，实时回调直接读写。
+- `status: Mutex<MicStatus>`：设备状态（选择、在用设备、是否连接、提示），**只在控制侧**加锁。
+- `update_level(peak)`：快升慢降（每次回调衰减到 0.9 倍），给 UI 电平表用。
+
+### 麦克风线程（`spawn_mic_thread`）
+
+```
+loop {
+    recv_timeout(1s) {
+        Select{device}  → open(device)：成功才替换旧流 + 记住选择；结果回给 API
+        超时            → watch()：断开则重连；跟随默认时检测默认设备变化
+    }
+    释放输出回调送回的旧环
+}
+```
+
+- `open(device)`：解析设备 → `input_risk` 检查 → 新建环 + `MicCapture` → `build_input` →
+  把消费端经 `cons_tx` 交给输出回调 → 替换旧流。任一步失败都保留旧流。
+- `set_unavailable(note)`：同一原因只记一次日志，避免每秒刷屏。
+
+### `input_risk(input, output)`（输入设备检查）
+
+- 返回 `Some(InputRisk::FeedbackLoop)`：输入是输出所在虚拟设备的另一端，输出会被录回自身。
+- 返回 `Some(InputRisk::SystemLoopback)`：输入是立体声混音这类回录设备，会录进游戏声音。
+- **为什么只看名称**：各平台没有统一 API 能查出「这个录音端点对应哪个播放端点」，
+  而虚拟音频线的命名很规律（「端点 (驱动)」、两端同名等）。
+- **为什么要求「是虚拟设备」**：同一块声卡的麦克风和扬声器驱动名也相同（如
+  `Realtek(R) Audio`），但它们不是反馈环，所以只有驱动名命中虚拟关键词才判反馈环。
+- 规则和关键词表见 `mic.rs` 顶部常量与 [音效板架构 §6.2](soundboard-architecture.md)。
+
+### `MicCapture`（输入回调侧）与 `MicReader`（输出回调侧）
+
+- `MicCapture::push`：下混单声道 → 线性插值重采样（`step = 输入采样率 / 输出采样率`）→ 写环。
+- `MicReader::mix_into`：先收新环（换设备）→ 漂移裁剪 → 抖动缓冲（primed）→ 按增益叠加到
+  各声道 → 更新电平。
+
+---
+
+## 13. app：桌面 App（Tauri 外壳）
+
+**位置**：`apps/app/`
+
+| 文件 | 内容 |
+|---|---|
+| `src/main.rs` | Tauri 入口：单实例插件、启动服务、创建窗口 |
+| `tauri.conf.json` | 产品名、标识符、图标；窗口在代码里创建（`windows: []`） |
+| `loading/index.html` | 服务启动失败时显示的错误页 |
+| `icons/` | 应用图标（`icon.ico` 含 16/32/48/256 尺寸） |
+
+- `start_server()`：开线程 → 建 tokio 运行时 → `block_on(run(config, on_ready))`，通过
+  `mpsc` 通道把端口传回主线程，最多等 20 秒。
+- `setup`：服务就绪则窗口加载 `WebviewUrl::External("http://127.0.0.1:<端口>")`，
+  否则加载内置错误页。
+- 窗口参数：1080×700、最小 760×520、背景色与界面一致（防白屏闪烁）、关闭 Tauri 拖放拦截。
+- `#![windows_subsystem = "windows"]`：发布版不弹控制台。
+- 构建：`build-app.ps1`（前端 → `cargo build --release -p soundbridge-app` → 复制 exe 与
+  `WebView2Loader.dll` 到 `dist-app/SoundBridge/`）。
 
 ---
 

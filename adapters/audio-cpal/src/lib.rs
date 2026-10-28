@@ -306,6 +306,179 @@ impl CpalBackend {
     }
 }
 
+/// 已解析的设备：设备本身 + 其原生（共享模式）配置。
+/// A resolved device: the device plus its native (shared-mode) config.
+///
+/// 先解析、再按 [`ResolvedDevice::config`] 准备回调状态（采样率、声道数），
+/// 最后用 [`CpalBackend::build_output`] / [`CpalBackend::build_input`] 建流。
+/// Resolve first, prepare callback state from [`ResolvedDevice::config`] (rate,
+/// channels), then open the stream with [`CpalBackend::build_output`] /
+/// [`CpalBackend::build_input`].
+pub struct ResolvedDevice {
+    device: cpal::Device,
+    name: String,
+    config: StreamConfig,
+}
+
+impl ResolvedDevice {
+    /// 设备名。Device name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// 设备原生采样率与声道数（`buffer_frames` 为 0）。
+    /// The device's native rate and channel count (`buffer_frames` is 0).
+    pub fn config(&self) -> StreamConfig {
+        self.config
+    }
+}
+
+impl CpalBackend {
+    /// 解析输出设备：`name` 为 `Some` 时按名称「包含」匹配（不区分大小写），否则用默认设备。
+    /// Resolve an output device: `Some(name)` matches by case-insensitive containment,
+    /// `None` uses the default device.
+    pub fn resolve_output(&self, name: Option<&str>) -> Result<ResolvedDevice, PlatformError> {
+        let device = match name {
+            Some(n) => find_by_name(
+                self.host
+                    .output_devices()
+                    .map_err(|e| PlatformError::Backend(e.to_string()))?,
+                n,
+            ),
+            None => self.host.default_output_device(),
+        }
+        .ok_or_else(|| {
+            PlatformError::DeviceNotFound(name.unwrap_or("default output").to_string())
+        })?;
+        let cfg = device
+            .default_output_config()
+            .map_err(|e| PlatformError::Backend(e.to_string()))?;
+        Ok(resolved(device, &cfg))
+    }
+
+    /// 解析输入设备（麦克风），规则同 [`Self::resolve_output`]。
+    /// Resolve an input device (microphone); same rules as [`Self::resolve_output`].
+    pub fn resolve_input(&self, name: Option<&str>) -> Result<ResolvedDevice, PlatformError> {
+        let device = match name {
+            Some(n) => find_by_name(
+                self.host
+                    .input_devices()
+                    .map_err(|e| PlatformError::Backend(e.to_string()))?,
+                n,
+            ),
+            None => self.host.default_input_device(),
+        }
+        .ok_or_else(|| {
+            PlatformError::DeviceNotFound(name.unwrap_or("default input").to_string())
+        })?;
+        let cfg = device
+            .default_input_config()
+            .map_err(|e| PlatformError::Backend(e.to_string()))?;
+        Ok(resolved(device, &cfg))
+    }
+
+    /// 以设备原生配置打开输出流。`buffer_frames` 为 0 表示设备默认缓冲区。
+    /// 回调收到的帧数可能与 `buffer_frames` 不同，回调须能处理任意长度。
+    /// Open an output stream at the device's native config. `buffer_frames` 0 means
+    /// the device default. The callback may receive a different frame count than
+    /// `buffer_frames` and must handle any length.
+    pub fn build_output<F>(
+        &self,
+        dev: ResolvedDevice,
+        buffer_frames: usize,
+        callback: F,
+    ) -> Result<Box<dyn platform_api::OutputStreamHandle>, PlatformError>
+    where
+        F: FnMut(&mut [f32]) + Send + 'static,
+    {
+        let stream_config = cpal::StreamConfig {
+            channels: dev.config.channels.0,
+            sample_rate: cpal::SampleRate(dev.config.sample_rate.0),
+            buffer_size: to_buffer_size(buffer_frames),
+        };
+        let mut callback = callback;
+        let stream = dev
+            .device
+            .build_output_stream(
+                &stream_config,
+                move |data: &mut [f32], _info| callback(data),
+                |err| log::error!("cpal output stream error: {err}"),
+                None,
+            )
+            .map_err(|e| PlatformError::Backend(e.to_string()))?;
+        stream
+            .play()
+            .map_err(|e| PlatformError::Backend(e.to_string()))?;
+        Ok(Box::new(CpalOutputStreamHandle {
+            inner: Mutex::new(Some(stream)),
+        }))
+    }
+
+    /// 以设备原生配置打开输入流（缓冲区用设备默认值）。
+    /// `on_error` 在流出错时调用（如蓝牙耳机断开、设备被拔出）。
+    /// Open an input stream at the device's native config (default buffer size).
+    /// `on_error` is called when the stream fails (e.g. a Bluetooth headset
+    /// disconnects or the device is unplugged).
+    pub fn build_input<F, E>(
+        &self,
+        dev: ResolvedDevice,
+        callback: F,
+        mut on_error: E,
+    ) -> Result<Box<dyn platform_api::InputStreamHandle>, PlatformError>
+    where
+        F: FnMut(&[f32]) + Send + 'static,
+        E: FnMut(String) + Send + 'static,
+    {
+        let stream_config = cpal::StreamConfig {
+            channels: dev.config.channels.0,
+            sample_rate: cpal::SampleRate(dev.config.sample_rate.0),
+            buffer_size: cpal::BufferSize::Default,
+        };
+        let mut callback = callback;
+        let stream = dev
+            .device
+            .build_input_stream(
+                &stream_config,
+                move |data: &[f32], _info| callback(data),
+                move |err| {
+                    log::error!("cpal input stream error: {err}");
+                    on_error(err.to_string());
+                },
+                None,
+            )
+            .map_err(|e| PlatformError::Backend(e.to_string()))?;
+        stream
+            .play()
+            .map_err(|e| PlatformError::Backend(e.to_string()))?;
+        Ok(Box::new(CpalInputStreamHandle {
+            inner: Mutex::new(Some(stream)),
+        }))
+    }
+}
+
+/// 按名称「包含」匹配设备（不区分大小写）。Find a device by case-insensitive containment.
+fn find_by_name(
+    mut devices: impl Iterator<Item = cpal::Device>,
+    name: &str,
+) -> Option<cpal::Device> {
+    let needle = name.to_lowercase();
+    devices.find(|d| {
+        d.name()
+            .map(|n| n.to_lowercase().contains(&needle))
+            .unwrap_or(false)
+    })
+}
+
+/// 组装 [`ResolvedDevice`]。Build a [`ResolvedDevice`].
+fn resolved(device: cpal::Device, cfg: &cpal::SupportedStreamConfig) -> ResolvedDevice {
+    let name = device.name().unwrap_or_else(|_| "unnamed".to_string());
+    ResolvedDevice {
+        device,
+        name,
+        config: StreamConfig::with_buffer(cfg.sample_rate().0, cfg.channels(), 0),
+    }
+}
+
 /// 输出流句柄（drop 时停止流）。Output stream handle (stops on drop).
 pub struct CpalOutputStreamHandle {
     inner: Mutex<Option<cpal::Stream>>,

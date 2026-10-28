@@ -1,0 +1,21 @@
+[package]
+name = "soundbridge-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SoundBridge 桌面 App（Tauri 外壳）。SoundBridge desktop app (Tauri shell)."
+
+[[bin]]
+name = "SoundBridge"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+soundbridge-server = { path = "../server" }
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+log = { workspace = true }
+env_logger = { workspace = true }

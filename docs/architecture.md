@@ -2,6 +2,11 @@
 
 > 本文档描述**已实现**的架构（第一阶段「核心引擎 + 桌面壳」），与设计基线 v1.1 保持一致，
 > 但只记录实际交付的内容。未实现的预留项（loopback、虚拟麦克风、插件隔离、协作）明确标注为「预留」。
+>
+> 主产品「音效板」（桌面 App `apps/app` + 服务库 `apps/server` + `crates/soundboard`：麦克风 +
+> 音效混合、音效库、运行中切换麦克风、断开重连、反馈环防护）的架构见
+> [soundboard-architecture.md](soundboard-architecture.md)。
+> 本文的引擎层（`audio-engine` / `application`）目前只被 `apps/desktop` CLI 使用。
 
 ## 1. 定位
 

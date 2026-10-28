@@ -21,8 +21,15 @@ use crate::VariableRateSource;
 /// varispeed 重采样源：包装一段已解码 PCM，按可变速率（含非整数）线性插值输出。
 /// Varispeed source: wraps decoded PCM and outputs at a variable (possibly fractional)
 /// rate via linear interpolation.
+///
+/// PCM 以 `Arc<[f32]>` 共享：`clone` 只增加引用计数、不复制音频、不分配，
+/// 因此可在实时线程里为同一音效创建多个播放实例。克隆体与原件共享欠载计数。
+/// PCM is shared as `Arc<[f32]>`: `clone` only bumps a refcount — no audio copy, no
+/// allocation — so the real-time thread can spawn many instances of one sound.
+/// Clones share the underrun counter with the original.
+#[derive(Clone)]
 pub struct VarispeedSource {
-    samples: Vec<f32>,
+    samples: Arc<[f32]>,
     channels: usize,
     sample_rate: u32,
     /// 当前读取相位（采样索引，非整数）。Current read phase (sample index, fractional).
@@ -38,7 +45,7 @@ impl VarispeedSource {
     /// 用已解码 PCM 构造。Construct from decoded PCM.
     pub fn new(audio: DecodedAudio) -> Self {
         Self {
-            samples: audio.samples,
+            samples: audio.samples.into(),
             channels: audio.channels,
             sample_rate: audio.sample_rate,
             phase: 0.0,
@@ -211,6 +218,18 @@ mod tests {
         assert_eq!(n, 4);
         // phase 0,2,4,6 → 0,2,4,6
         assert_eq!(&out[..4], &[0.0, 2.0, 4.0, 6.0]);
+    }
+
+    #[test]
+    fn clone_shares_pcm_but_plays_independently() {
+        let mut a = VarispeedSource::new(ramp(10));
+        let mut b = a.clone();
+        let mut out = vec![0.0; 3];
+        a.fill(&mut out, 3, 1.0);
+        // b 的相位不受 a 影响，从头播放。b's phase is unaffected by a.
+        b.fill(&mut out, 3, 1.0);
+        assert_eq!(&out[..3], &[0.0, 1.0, 2.0]);
+        assert!(Arc::ptr_eq(&a.samples, &b.samples));
     }
 
     #[test]
