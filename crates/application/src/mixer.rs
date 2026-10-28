@@ -47,7 +47,11 @@ impl Mixer {
 
     /// 设置文件源速率。Set file source rate.
     pub fn set_file_speed(&self, speed: f32) {
-        let s = if speed.is_nan() || speed <= 0.0 { 1.0 } else { speed.clamp(0.0625, 16.0) };
+        let s = if speed.is_nan() || speed <= 0.0 {
+            1.0
+        } else {
+            speed.clamp(0.0625, 16.0)
+        };
         self.file_speed.store(s.to_bits(), Ordering::Relaxed);
     }
 
@@ -77,8 +81,8 @@ impl Mixer {
         let fg = self.file_gain_lin();
         let mg = self.mic_gain_lin();
         for i in 0..out.len() {
-            let s = file.get(i).copied().unwrap_or(0.0) * fg
-                + mic.get(i).copied().unwrap_or(0.0) * mg;
+            let s =
+                file.get(i).copied().unwrap_or(0.0) * fg + mic.get(i).copied().unwrap_or(0.0) * mg;
             out[i] = s.tanh();
         }
     }

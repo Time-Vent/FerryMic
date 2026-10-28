@@ -101,7 +101,8 @@ pub trait InputStreamHandle {
 /// Windows does not implement this trait (see `SystemAudioLoopback` and
 /// `AudioBackend::open_output`).
 pub trait VirtualMic: Send {
-    fn create(&mut self, config: &StreamConfig) -> Result<Box<dyn VirtualMicHandle>, PlatformError>;
+    fn create(&mut self, config: &StreamConfig)
+        -> Result<Box<dyn VirtualMicHandle>, PlatformError>;
 
     /// 由独立线程 drain SPSC 环后调用，**不在实时回调上执行**。
     /// Called after draining the SPSC ring on a dedicated thread, NOT on the realtime

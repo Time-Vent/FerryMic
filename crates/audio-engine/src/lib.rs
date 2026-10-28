@@ -23,6 +23,6 @@ mod clock;
 mod engine;
 mod executors;
 
-pub use clock::{DriftController, DriftConfig};
+pub use clock::{DriftConfig, DriftController};
 pub use engine::{Engine, EngineConfig, EngineEvent};
 pub use executors::{ControlExecutor, DecodeExecutor, RealtimeCallback};

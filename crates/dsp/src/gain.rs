@@ -26,7 +26,11 @@ impl Gain {
     /// 设置增益。`smoothing_samples` 为平滑窗口（采样数）；0 为立即生效。
     pub fn set_gain_db(&mut self, gain_db: f32, smoothing_samples: usize) {
         let lin = db_to_linear(gain_db);
-        let lin = if lin.is_nan() { 0.0 } else { lin.clamp(0.0, 64.0) };
+        let lin = if lin.is_nan() {
+            0.0
+        } else {
+            lin.clamp(0.0, 64.0)
+        };
         self.target = lin;
         if smoothing_samples > 0 {
             self.step = (self.target - self.current) / smoothing_samples as f32;

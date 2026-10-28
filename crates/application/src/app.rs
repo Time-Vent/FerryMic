@@ -189,25 +189,27 @@ impl App {
         let mut file_buf = vec![0.0f32; out_samples];
         let mut mic_buf = vec![0.0f32; out_samples];
 
-        let output = self.backend.open_output(&out_config, move |data: &mut [f32]| {
-            // 1. 从环取 PCM（文件、麦克风），不足补静音。
-            // 1. Pull PCM from rings (file, mic); pad silence when short.
-            let n_file = file_cons.pop_slice(&mut file_buf);
-            for s in file_buf[n_file..].iter_mut() {
-                *s = 0.0;
-            }
-            let n_mic = mic_cons.pop_slice(&mut mic_buf);
-            for s in mic_buf[n_mic..].iter_mut() {
-                *s = 0.0;
-            }
+        let output = self
+            .backend
+            .open_output(&out_config, move |data: &mut [f32]| {
+                // 1. 从环取 PCM（文件、麦克风），不足补静音。
+                // 1. Pull PCM from rings (file, mic); pad silence when short.
+                let n_file = file_cons.pop_slice(&mut file_buf);
+                for s in file_buf[n_file..].iter_mut() {
+                    *s = 0.0;
+                }
+                let n_mic = mic_cons.pop_slice(&mut mic_buf);
+                for s in mic_buf[n_mic..].iter_mut() {
+                    *s = 0.0;
+                }
 
-            // 2. 混音（含软限幅）。2. Mix (with soft limiting).
-            out_mixer.mix(&file_buf, &mic_buf, &mut out_buf);
+                // 2. 混音（含软限幅）。2. Mix (with soft limiting).
+                out_mixer.mix(&file_buf, &mic_buf, &mut out_buf);
 
-            // 3. 写出。3. Write out.
-            let n = data.len().min(out_buf.len());
-            data[..n].copy_from_slice(&out_buf[..n]);
-        })?;
+                // 3. 写出。3. Write out.
+                let n = data.len().min(out_buf.len());
+                data[..n].copy_from_slice(&out_buf[..n]);
+            })?;
 
         // 输入流：麦克风回调写环。
         // Input stream: mic callback writes ring.
@@ -234,7 +236,12 @@ impl App {
 
                 // 声道转换：源声道 → 引擎声道。
                 // Channel convert: source → engine channels.
-                convert_channels(&src_buf[..n * src_channels], src_channels, &mut conv_buf, channels);
+                convert_channels(
+                    &src_buf[..n * src_channels],
+                    src_channels,
+                    &mut conv_buf,
+                    channels,
+                );
 
                 let _ = file_prod.push_slice(&conv_buf[..n * channels]);
 

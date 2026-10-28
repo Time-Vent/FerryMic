@@ -26,13 +26,7 @@ pub struct BiquadParams {
 
 impl BiquadParams {
     /// 根据 RBJ 公式计算归一化系数。
-    pub fn rbj(
-        kind: BiquadKind,
-        sample_rate: f32,
-        freq_hz: f32,
-        q: f32,
-        gain_db: f32,
-    ) -> Self {
+    pub fn rbj(kind: BiquadKind, sample_rate: f32, freq_hz: f32, q: f32, gain_db: f32) -> Self {
         let a = 10.0_f32.powf(gain_db / 40.0); // 峰值/架式的 A
         let w0 = 2.0 * PI * (freq_hz / sample_rate).clamp(1e-6, 0.499);
         let cos = w0.cos();
@@ -63,7 +57,14 @@ impl BiquadParams {
             }
             BiquadKind::Peak => {
                 let a0 = 1.0 + alpha / a;
-                (1.0 + alpha * a, -2.0 * cos, 1.0 - alpha * a, a0, -2.0 * cos, 1.0 - alpha / a)
+                (
+                    1.0 + alpha * a,
+                    -2.0 * cos,
+                    1.0 - alpha * a,
+                    a0,
+                    -2.0 * cos,
+                    1.0 - alpha / a,
+                )
             }
             BiquadKind::LowShelf => {
                 let sq = 2.0 * a.sqrt() * alpha;
@@ -147,7 +148,13 @@ impl FixedProcessor for Biquad {
     }
 
     fn reset(&mut self) {
-        for v in self.x1.iter_mut().chain(&mut self.x2).chain(&mut self.y1).chain(&mut self.y2) {
+        for v in self
+            .x1
+            .iter_mut()
+            .chain(&mut self.x2)
+            .chain(&mut self.y1)
+            .chain(&mut self.y2)
+        {
             *v = 0.0;
         }
     }

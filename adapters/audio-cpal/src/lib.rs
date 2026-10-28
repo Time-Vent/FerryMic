@@ -202,7 +202,9 @@ impl AudioBackend for CpalBackend {
             )
             .map_err(|e| PlatformError::Backend(e.to_string()))?;
 
-        stream.play().map_err(|e| PlatformError::Backend(e.to_string()))?;
+        stream
+            .play()
+            .map_err(|e| PlatformError::Backend(e.to_string()))?;
 
         Ok(Box::new(CpalInputStreamHandle {
             inner: Arc::new(Mutex::new(Some(stream))),
@@ -294,7 +296,9 @@ impl CpalBackend {
             )
             .map_err(|e| PlatformError::Backend(e.to_string()))?;
 
-        stream.play().map_err(|e| PlatformError::Backend(e.to_string()))?;
+        stream
+            .play()
+            .map_err(|e| PlatformError::Backend(e.to_string()))?;
 
         Ok(Box::new(CpalOutputStreamHandle {
             inner: Arc::new(Mutex::new(Some(stream))),
@@ -314,7 +318,8 @@ impl platform_api::OutputStreamHandle for CpalOutputStreamHandle {
             .lock()
             .map_err(|_| PlatformError::Backend("lock poisoned".into()))?;
         if let Some(s) = guard.as_ref() {
-            s.pause().map_err(|e| PlatformError::Backend(e.to_string()))?;
+            s.pause()
+                .map_err(|e| PlatformError::Backend(e.to_string()))?;
         }
         Ok(())
     }
@@ -325,7 +330,8 @@ impl platform_api::OutputStreamHandle for CpalOutputStreamHandle {
             .lock()
             .map_err(|_| PlatformError::Backend("lock poisoned".into()))?;
         if let Some(s) = guard.as_ref() {
-            s.play().map_err(|e| PlatformError::Backend(e.to_string()))?;
+            s.play()
+                .map_err(|e| PlatformError::Backend(e.to_string()))?;
         }
         Ok(())
     }
@@ -343,7 +349,8 @@ impl platform_api::InputStreamHandle for CpalInputStreamHandle {
             .lock()
             .map_err(|_| PlatformError::Backend("lock poisoned".into()))?;
         if let Some(s) = guard.as_ref() {
-            s.pause().map_err(|e| PlatformError::Backend(e.to_string()))?;
+            s.pause()
+                .map_err(|e| PlatformError::Backend(e.to_string()))?;
         }
         Ok(())
     }
@@ -354,7 +361,8 @@ impl platform_api::InputStreamHandle for CpalInputStreamHandle {
             .lock()
             .map_err(|_| PlatformError::Backend("lock poisoned".into()))?;
         if let Some(s) = guard.as_ref() {
-            s.play().map_err(|e| PlatformError::Backend(e.to_string()))?;
+            s.play()
+                .map_err(|e| PlatformError::Backend(e.to_string()))?;
         }
         Ok(())
     }

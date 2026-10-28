@@ -144,7 +144,10 @@ async fn add_sound(
     // 发命令给音频线程 + 记录到列表。
     // Send command to audio thread + record in list.
     if let Err(e) = state.cmd_tx.send(BoardCommand::AddSound(spec.clone())) {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("发送命令失败: {e}")));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("发送命令失败: {e}"),
+        ));
     }
     state.sounds.lock().unwrap().push(spec.clone());
 
@@ -164,11 +167,19 @@ async fn remove_sound(
     State(state): State<AppState>,
     Path(id): Path<SoundId>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    if let Err(e) = state.cmd_tx.send(BoardCommand::RemoveSound { sound_id: id }) {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("发送命令失败: {e}")));
+    if let Err(e) = state
+        .cmd_tx
+        .send(BoardCommand::RemoveSound { sound_id: id })
+    {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("发送命令失败: {e}"),
+        ));
     }
     // 注销该音效的全局热键。Unregister the sound's global hotkey.
-    let _ = state.hotkey_tx.send(hotkeys::HotkeyCommand::Unregister { sound_id: id });
+    let _ = state
+        .hotkey_tx
+        .send(hotkeys::HotkeyCommand::Unregister { sound_id: id });
     state.sounds.lock().unwrap().retain(|s| s.id != id);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -179,7 +190,10 @@ async fn trigger_sound(
     Path(id): Path<SoundId>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     if let Err(e) = state.cmd_tx.send(BoardCommand::Trigger { sound_id: id }) {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("发送命令失败: {e}")));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("发送命令失败: {e}"),
+        ));
     }
     Ok(StatusCode::OK)
 }
@@ -190,7 +204,10 @@ async fn stop_sound(
     Path(id): Path<SoundId>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     if let Err(e) = state.cmd_tx.send(BoardCommand::Stop { sound_id: id }) {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("发送命令失败: {e}")));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("发送命令失败: {e}"),
+        ));
     }
     Ok(StatusCode::OK)
 }
@@ -210,7 +227,10 @@ async fn set_gain(
         sound_id: id,
         gain_db: req.gain_db,
     }) {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("发送命令失败: {e}")));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("发送命令失败: {e}"),
+        ));
     }
     if let Some(s) = state.sounds.lock().unwrap().iter_mut().find(|s| s.id == id) {
         s.gain_db = req.gain_db;
@@ -233,7 +253,10 @@ async fn set_speed(
         sound_id: id,
         speed: req.speed,
     }) {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("发送命令失败: {e}")));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("发送命令失败: {e}"),
+        ));
     }
     if let Some(s) = state.sounds.lock().unwrap().iter_mut().find(|s| s.id == id) {
         s.speed = req.speed;
@@ -247,10 +270,7 @@ fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/devices", get(list_devices))
         .route("/sounds", get(list_sounds).post(add_sound))
-        .route(
-            "/sounds/:id",
-            delete(remove_sound),
-        )
+        .route("/sounds/:id", delete(remove_sound))
         .route("/sounds/:id/trigger", post(trigger_sound))
         .route("/sounds/:id/stop", post(stop_sound))
         .route("/sounds/:id/gain", post(set_gain))

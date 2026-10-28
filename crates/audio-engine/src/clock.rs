@@ -85,12 +85,16 @@ impl DriftController {
         // 原始比率：>1 加快消费（水位低时），<1 放慢。
         // Raw ratio: >1 consumes faster (when fill is low), <1 slower.
         let raw = 1.0 + (cfg.kp * err + self.integral) / 1_000_000.0;
-        let raw = raw.clamp(1.0 - cfg.max_ppm / 1_000_000.0, 1.0 + cfg.max_ppm / 1_000_000.0);
+        let raw = raw.clamp(
+            1.0 - cfg.max_ppm / 1_000_000.0,
+            1.0 + cfg.max_ppm / 1_000_000.0,
+        );
 
         // 一阶低通平滑。First-order low-pass smoothing.
         self.smoothed = self.smoothed * (1.0 - cfg.smoothing) + raw * cfg.smoothing;
 
-        self.ratio_bits.store(self.smoothed.to_bits(), Ordering::Relaxed);
+        self.ratio_bits
+            .store(self.smoothed.to_bits(), Ordering::Relaxed);
     }
 
     /// 实时侧只读当前重采样比率。

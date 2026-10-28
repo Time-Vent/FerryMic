@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use application::{App, AppConfig};
 use anyhow::{Context, Result};
+use application::{App, AppConfig};
 use audio_source::{VariableRateSource, VarispeedSource};
 
 /// 命令行参数。Command-line arguments.
@@ -169,7 +169,9 @@ fn render_file(input: &Path, output: &Path, speed: f32, gain_db: f32) -> Result<
         }
     }
 
-    writer.finalize().context("写入 WAV 失败 failed to finalize")?;
+    writer
+        .finalize()
+        .context("写入 WAV 失败 failed to finalize")?;
     log::info!(
         "渲染完成 rendered: {} -> {} (speed={}, gain={}dB)",
         input.display(),

@@ -92,7 +92,9 @@ pub fn spawn_hotkey_thread(cmd_rx: Receiver<HotkeyCommand>, cmd_tx: Sender<Board
             if let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
                 if event.state == HotKeyState::Pressed {
                     if let Some((_, sound_id)) = map.get(&event.id) {
-                        let _ = cmd_tx.send(BoardCommand::Trigger { sound_id: *sound_id });
+                        let _ = cmd_tx.send(BoardCommand::Trigger {
+                            sound_id: *sound_id,
+                        });
                     }
                 }
             }

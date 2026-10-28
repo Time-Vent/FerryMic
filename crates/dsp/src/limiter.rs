@@ -29,7 +29,11 @@ impl Limiter {
 
     pub fn set_threshold_db(&mut self, db: f32) {
         let lin = db_to_linear(db);
-        self.threshold = if lin.is_nan() { 0.0 } else { lin.clamp(0.0, 1.0) };
+        self.threshold = if lin.is_nan() {
+            0.0
+        } else {
+            lin.clamp(0.0, 1.0)
+        };
     }
 
     pub fn set_release_ms(&mut self, ms: f32, sample_rate: u32) {
