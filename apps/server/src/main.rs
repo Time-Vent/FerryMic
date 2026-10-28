@@ -14,6 +14,7 @@
 //! audio is processed on the **PC** and output to speaker / virtual cable.
 
 mod audio;
+mod hotkeys;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -32,6 +33,8 @@ use tower_http::services::ServeDir;
 struct AppState {
     /// 命令发送端（→ 音频线程）。Command sender (→ audio thread).
     cmd_tx: Sender<BoardCommand>,
+    /// 热键指令发送端（→ 热键线程）。Hotkey command sender (→ hotkey thread).
+    hotkey_tx: Sender<hotkeys::HotkeyCommand>,
     /// 音效列表（供 API 读取）。Sound list (for API reads).
     sounds: Arc<Mutex<Vec<SoundSpec>>>,
     /// 音效 ID 自增。Auto-incrementing sound id.
@@ -116,6 +119,14 @@ async fn add_sound(
     }
     state.sounds.lock().unwrap().push(spec.clone());
 
+    // 有快捷键则注册全局热键。Register a global hotkey if bound.
+    if let Some(hotkey) = &spec.hotkey {
+        let _ = state.hotkey_tx.send(hotkeys::HotkeyCommand::Register {
+            sound_id: id,
+            hotkey: hotkey.clone(),
+        });
+    }
+
     Ok(Json(SoundItem::from(&spec)))
 }
 
@@ -127,6 +138,8 @@ async fn remove_sound(
     if let Err(e) = state.cmd_tx.send(BoardCommand::RemoveSound { sound_id: id }) {
         return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("发送命令失败: {e}")));
     }
+    // 注销该音效的全局热键。Unregister the sound's global hotkey.
+    let _ = state.hotkey_tx.send(hotkeys::HotkeyCommand::Unregister { sound_id: id });
     state.sounds.lock().unwrap().retain(|s| s.id != id);
     Ok(StatusCode::NO_CONTENT)
 }
@@ -233,8 +246,14 @@ async fn main() -> anyhow::Result<()> {
     let stream = audio::spawn_audio_thread(cmd_rx)?;
     let _audio = audio::AudioHandle::new(stream);
 
+    // 热键通道：Web 服务 → 热键线程；热键触发 → 音频命令队列。
+    // Hotkey channel: web service → hotkey thread; hotkey press → audio command queue.
+    let (hotkey_tx, hotkey_rx) = unbounded::<hotkeys::HotkeyCommand>();
+    hotkeys::spawn_hotkey_thread(hotkey_rx, cmd_tx.clone());
+
     let state = AppState {
         cmd_tx,
+        hotkey_tx,
         sounds: Arc::new(Mutex::new(Vec::new())),
         next_id: Arc::new(AtomicU32::new(1)),
     };
