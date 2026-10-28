@@ -1,0 +1,17 @@
+[package]
+name = "application"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+audio-types = { workspace = true }
+platform-api = { workspace = true }
+dsp = { workspace = true }
+audio-graph = { workspace = true }
+audio-source = { workspace = true }
+audio-engine = { workspace = true }
+audio-cpal = { workspace = true }
+ringbuf = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

@@ -1,0 +1,12 @@
+# deny.toml — cargo-deny 配置（依赖许可证与安全审计）
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-DFS-2016"]
+copyleft = "deny"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[advisories]
+vulnerability = "deny"
+unmaintained = "warn"

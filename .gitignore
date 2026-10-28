@@ -1,0 +1,13 @@
+# 忽略编译产物与临时文件
+# Ignore build artifacts and temp files
+/target/
+**/*.rs.bk
+
+# 忽略本地渲染输出
+# Ignore local render outputs
+tests/fixtures/audio/out_*.wav
+
+# 编辑器
+.editorconfig
+.idea/
+.vscode/

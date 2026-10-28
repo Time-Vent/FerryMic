@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/audio-types",
+    "crates/platform-api",
+    "crates/dsp",
+    "crates/audio-graph",
+    "crates/audio-source",
+    "crates/audio-engine",
+    "crates/application",
+    "adapters/audio-cpal",
+    "apps/desktop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/soundbridge/soundbridge"
+
+[workspace.dependencies]
+# 内部 crate
+audio-types = { path = "crates/audio-types" }
+platform-api = { path = "crates/platform-api" }
+dsp = { path = "crates/dsp" }
+audio-graph = { path = "crates/audio-graph" }
+audio-source = { path = "crates/audio-source" }
+audio-engine = { path = "crates/audio-engine" }
+application = { path = "crates/application" }
+audio-cpal = { path = "adapters/audio-cpal" }
+
+# 外部依赖（统一版本）
+cpal = "0.15"
+crossbeam-channel = "0.5"
+ringbuf = "0.4"
+hound = "3.5"
+anyhow = "1"
+thiserror = "1"
+log = "0.4"
+env_logger = "0.11"
+ctrlc = "3.4"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

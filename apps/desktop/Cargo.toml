@@ -1,0 +1,22 @@
+[package]
+name = "soundbridge-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "soundbridge"
+path = "src/main.rs"
+
+[dependencies]
+audio-types = { workspace = true }
+platform-api = { workspace = true }
+audio-engine = { workspace = true }
+audio-source = { workspace = true }
+application = { workspace = true }
+audio-cpal = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+ctrlc = { workspace = true }
+hound = { workspace = true }

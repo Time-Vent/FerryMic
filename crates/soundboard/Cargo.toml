@@ -1,0 +1,10 @@
+[package]
+name = "soundboard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+audio-types = { workspace = true }
+audio-source = { workspace = true }
+thiserror = { workspace = true }
