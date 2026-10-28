@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>SoundBridge 音效板</title>
+    <script type="module" crossorigin src="/assets/index-C2FFoQga.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BqMxIuCC.css">
+  </head>
+  <body>
+    <header>
+      <h1>SoundBridge 音效板</h1>
+      <span id="conn-status" class="status">连接中…</span>
+    </header>
+
+    <main>
+      <!-- 添加音效表单 -->
+      <section class="card" id="add-card">
+        <h2>添加音效</h2>
+        <form id="add-form">
+          <label>名称 <input name="name" required placeholder="如：鼓掌" /></label>
+          <label>文件路径 <input name="file_path" required placeholder="如：C:\sounds\clap.wav" /></label>
+          <label>触发模式
+            <select name="trigger_mode">
+              <option value="OneShot">点按（每次从头播）</option>
+              <option value="Loop">循环（再按停止）</option>
+              <option value="Exclusive">独占（打断其他）</option>
+              <option value="Overlap">叠加（可同时播）</option>
+            </select>
+          </label>
+          <label>音量 dB <input name="gain_db" type="number" step="1" value="0" /></label>
+          <label>倍速 <input name="speed" type="number" step="0.1" min="0.1" max="16" value="1" /></label>
+          <label>快捷键（可选）<input name="hotkey" placeholder="如：F1 或 Ctrl+Alt+1" /></label>
+          <button type="submit">添加</button>
+        </form>
+      </section>
+
+      <!-- 音效列表 -->
+      <section id="sound-list"></section>
+    </main>
+
+  </body>
+</html>

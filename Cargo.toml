@@ -11,6 +11,7 @@ members = [
     "crates/soundboard",
     "adapters/audio-cpal",
     "apps/desktop",
+    "apps/server",
 ]
 
 [workspace.package]

@@ -22,13 +22,14 @@
 use std::collections::HashMap;
 
 use audio_source::{VariableRateSource, VarispeedSource};
+use serde::{Deserialize, Serialize};
 
 /// 音效唯一标识。Sound unique identifier.
 pub type SoundId = u32;
 
 /// 触发模式（用户可 DIY）。
 /// Trigger mode (user-configurable).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TriggerMode {
     /// 点按：每按一次从头播放一遍，播完自动停止。
     /// One-shot: each press plays once from the start, then stops.
@@ -46,7 +47,7 @@ pub enum TriggerMode {
 
 /// 一个音效的定义（控制侧配置，可跨线程共享）。
 /// A sound's definition (control-side config, shareable across threads).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SoundSpec {
     pub id: SoundId,
     /// 显示名称。Display name.

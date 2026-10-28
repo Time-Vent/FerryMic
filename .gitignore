@@ -7,6 +7,10 @@
 # Ignore local render outputs
 tests/fixtures/audio/out_*.wav
 
+# 前端依赖（dist 构建产物保留提交，方便直接运行 server）
+# Front-end deps (dist kept in git for running the server directly)
+apps/web/node_modules/
+
 # 编辑器
 .editorconfig
 .idea/
