@@ -120,40 +120,71 @@ pub struct MicStatus {
 
 /// 控制侧 → 麦克风线程的请求。Request from the control side to the mic thread.
 pub enum MicRequest {
-    /// 选择设备（`None` = 跟随系统默认），结果经 `reply` 返回。
-    /// Select a device (`None` = follow default); the result comes back on `reply`.
+    /// 选择设备（`None` = 自动：优先系统默认的硬件麦克风），结果经 `reply` 返回。
+    /// Select a device (`None` = auto: prefer the system default hardware mic); the
+    /// result comes back on `reply`.
     Select {
         device: Option<String>,
         reply: Sender<Result<(), String>>,
     },
+    /// 输出设备变了：按新的输出名（反馈环检测）与采样率重新打开麦克风。
+    /// The output device changed: reopen the mic for the new output name (loop
+    /// detection) and sample rate.
+    OutputChanged { output_name: String, out_rate: u32 },
 }
 
-/// 输出回调持有的麦克风端点：接收新环的消费端，送回旧消费端。
+/// 输出回调持有的麦克风端点：接收新环的消费端，送回旧消费端。可克隆：
+/// 重建输出流时新的回调拿一份。
 /// Mic endpoints held by the output callback: receives new ring consumers and sends
-/// old ones back.
+/// old ones back. Cloneable: a rebuilt output stream's callback takes a copy.
+#[derive(Clone)]
 pub struct MicLink {
     pub cons_rx: Receiver<HeapCons<f32>>,
     pub retired_tx: Sender<HeapCons<f32>>,
 }
 
-/// 启动麦克风线程。返回请求发送端与交给输出回调的 [`MicLink`]。
-/// Start the mic thread. Returns the request sender and the [`MicLink`] for the
-/// output callback.
+/// 麦克风线程一侧的通道端点。The mic thread's side of the channels.
+pub struct MicEnds {
+    cons_tx: Sender<HeapCons<f32>>,
+    retired_rx: Receiver<HeapCons<f32>>,
+}
+
+/// 创建麦克风线程与输出回调之间的通道。Create the channels between the mic thread and
+/// the output callback.
+pub fn link_channels() -> (MicEnds, MicLink) {
+    let (cons_tx, cons_rx) = bounded::<HeapCons<f32>>(4);
+    let (retired_tx, retired_rx) = bounded::<HeapCons<f32>>(4);
+    (
+        MicEnds {
+            cons_tx,
+            retired_rx,
+        },
+        MicLink {
+            cons_rx,
+            retired_tx,
+        },
+    )
+}
+
+/// 启动麦克风线程，返回请求发送端。Start the mic thread; returns the request sender.
 ///
-/// - `initial`：初始选择（`None` = 系统默认）。Initial selection (`None` = default).
+/// - `initial`：初始选择（`None` = 自动）。Initial selection (`None` = auto).
 /// - `output_name`：输出设备名，用于反馈环检测。Output device name, for loop detection.
 /// - `out_rate`：输出采样率，麦克风会被重采样到该速率。Output rate the mic is
 ///   resampled to.
 pub fn spawn_mic_thread(
+    ends: MicEnds,
     initial: Option<String>,
     output_name: String,
     out_rate: u32,
     mic: Arc<MicControl>,
     settings: Arc<SettingsStore>,
-) -> (Sender<MicRequest>, MicLink) {
+) -> Sender<MicRequest> {
     let (req_tx, req_rx) = bounded::<MicRequest>(8);
-    let (cons_tx, cons_rx) = bounded::<HeapCons<f32>>(4);
-    let (retired_tx, retired_rx) = bounded::<HeapCons<f32>>(4);
+    let MicEnds {
+        cons_tx,
+        retired_rx,
+    } = ends;
 
     std::thread::Builder::new()
         .name("soundbridge-mic".into())
@@ -172,7 +203,10 @@ pub fn spawn_mic_thread(
             let sel = t.selection.clone();
             if let Err(e) = t.open(sel) {
                 // 与巡检重连时的提示一致。Same wording as the watcher's retry note.
-                t.set_unavailable(format!("等待麦克风连接… {e}"));
+                t.set_unavailable(trf!(
+                    "等待麦克风连接… {e}",
+                    "Waiting for the microphone… {e}"
+                ));
             }
 
             loop {
@@ -186,6 +220,23 @@ pub fn spawn_mic_thread(
                         }
                         let _ = reply.send(result);
                     }
+                    Ok(MicRequest::OutputChanged {
+                        output_name,
+                        out_rate,
+                    }) => {
+                        t.output_name = output_name;
+                        t.out_rate = out_rate;
+                        // 新的输出回调需要新环；可能因反馈环检测而打不开。
+                        // The new output callback needs a new ring; the loop check may refuse.
+                        t.stream = None;
+                        let sel = t.selection.clone();
+                        if let Err(e) = t.open(sel) {
+                            t.set_unavailable(trf!(
+                                "等待麦克风连接… {e}",
+                                "Waiting for the microphone… {e}"
+                            ));
+                        }
+                    }
                     Err(RecvTimeoutError::Timeout) => t.watch(),
                     Err(RecvTimeoutError::Disconnected) => break,
                 }
@@ -195,13 +246,7 @@ pub fn spawn_mic_thread(
         })
         .expect("spawn mic thread");
 
-    (
-        req_tx,
-        MicLink {
-            cons_rx,
-            retired_tx,
-        },
-    )
+    req_tx
 }
 
 /// 麦克风线程状态。Mic thread state.
@@ -221,17 +266,41 @@ struct MicThread {
 }
 
 impl MicThread {
-    /// 打开 `device`（`None` = 系统默认）并替换当前流。失败时保留当前流。
-    /// Open `device` (`None` = system default) and replace the current stream. On
-    /// failure the current stream is kept.
+    /// 自动选择：系统默认录音设备是硬件麦克风就用它，否则用第一个硬件麦克风。
+    /// 「硬件」= 不是虚拟音频线、不是回录设备、不与当前输出构成反馈环。
+    /// Auto pick: the system default if it's a hardware mic, else the first hardware
+    /// mic. "Hardware" = not a virtual cable, not a loopback device, no loop with the
+    /// current output.
+    fn auto_pick(&self) -> Option<String> {
+        let usable = |n: &str| !is_virtual_device(n) && input_risk(n, &self.output_name).is_none();
+        if let Ok(d) = self.backend.resolve_input(None) {
+            if usable(d.name()) {
+                return Some(d.name().to_string());
+            }
+        }
+        self.backend
+            .input_device_names()
+            .into_iter()
+            .find(|n| usable(n))
+    }
+
+    /// 打开 `device`（`None` = 自动选择）并替换当前流。失败时保留当前流。
+    /// Open `device` (`None` = auto pick) and replace the current stream. On failure
+    /// the current stream is kept.
     fn open(&mut self, device: Option<String>) -> Result<(), String> {
-        let dev = self
-            .backend
-            .resolve_input(device.as_deref())
-            .map_err(|e| match &device {
-                Some(d) => format!("找不到麦克风「{d}」：{e}"),
-                None => format!("没有可用的默认麦克风：{e}"),
-            })?;
+        let target = match &device {
+            Some(d) => d.clone(),
+            None => self.auto_pick().ok_or(tr!(
+                "没有找到硬件麦克风（虚拟音频线不会被当作麦克风）",
+                "No hardware microphone found (virtual cables aren't used as mics)"
+            ))?,
+        };
+        let dev = self.backend.resolve_input(Some(&target)).map_err(|e| {
+            trf!(
+                "找不到麦克风「{target}」：{e}",
+                "Microphone \"{target}\" not found: {e}"
+            )
+        })?;
         let name = dev.name().to_string();
         if let Some(risk) = input_risk(&name, &self.output_name) {
             return Err(risk.message(&name, &self.output_name));
@@ -252,11 +321,20 @@ impl MicThread {
                 move |data: &[f32]| capture.push(data),
                 move |_| failed_cb.store(true, Ordering::Relaxed),
             )
-            .map_err(|e| format!("无法打开麦克风「{name}」：{e}"))?;
+            .map_err(|e| {
+                trf!(
+                    "无法打开麦克风「{name}」：{e}",
+                    "Can't open microphone \"{name}\": {e}"
+                )
+            })?;
 
-        self.cons_tx
-            .try_send(cons)
-            .map_err(|_| "音频线程未响应，请稍后重试".to_string())?;
+        self.cons_tx.try_send(cons).map_err(|_| {
+            tr!(
+                "音频线程未响应，请稍后重试",
+                "The audio thread is not responding; try again"
+            )
+            .to_string()
+        })?;
         // 替换旧流（drop 即停止）。Replace the old stream (dropping stops it).
         self.stream = Some((handle, failed));
         self.last_warning = None;
@@ -298,19 +376,24 @@ impl MicThread {
             }
             let sel = self.selection.clone();
             if let Err(e) = self.open(sel) {
-                self.set_unavailable(format!("等待麦克风连接… {e}"));
+                self.set_unavailable(trf!(
+                    "等待麦克风连接… {e}",
+                    "Waiting for the microphone… {e}"
+                ));
             }
             return;
         }
 
         if self.selection.is_none() {
-            // 跟随系统默认：默认设备换了就切过去（切换失败则保留当前设备）。
-            // Following the default: switch when it changes (keep current on failure).
-            let Ok(default) = self.backend.resolve_input(None) else {
+            // 自动模式：自动选出的设备变了（如连上手机 mic、改了系统默认）就切过去，
+            // 切换失败则保留当前设备。
+            // Auto mode: switch when the auto pick changes (phone mic connected, system
+            // default changed); keep the current device on failure.
+            let Some(pick) = self.auto_pick() else {
                 return;
             };
             let current = self.mic.status().device;
-            if current.as_deref() != Some(default.name()) {
+            if current.as_deref() != Some(pick.as_str()) {
                 if let Err(e) = self.open(None) {
                     if self.last_warning.as_deref() != Some(&e) {
                         log::warn!("未切换到新的默认麦克风 not switching to new default: {e}");
@@ -372,14 +455,35 @@ impl InputRisk {
     /// 给用户看的说明。User-facing explanation.
     pub fn message(self, input: &str, output: &str) -> String {
         match self {
-            Self::FeedbackLoop => format!(
-                "「{input}」与输出「{output}」是同一个虚拟音频设备的两端，会形成反馈环，请选择真实麦克风"
+            Self::FeedbackLoop => trf!(
+                "「{input}」与输出「{output}」是同一个虚拟音频设备的两端，会形成反馈环，请选择真实麦克风",
+                "\"{input}\" is the other end of the output \"{output}\" and would loop back; pick a real microphone"
             ),
-            Self::SystemLoopback => format!(
-                "「{input}」是回录设备，会把电脑正在播放的所有声音（包括游戏）录进去，请选择真实麦克风"
+            Self::SystemLoopback => trf!(
+                "「{input}」是回录设备，会把电脑正在播放的所有声音（包括游戏）录进去，请选择真实麦克风",
+                "\"{input}\" records everything the computer plays (games included); pick a real microphone"
             ),
         }
     }
+}
+
+/// 是否为虚拟音频设备（按名称关键词）。用于区分硬件麦克风，以及判断输出是虚拟线还是扬声器。
+/// Whether a device is a virtual audio device (by name keywords). Used to tell hardware
+/// mics apart and whether the output is a virtual cable or a speaker.
+pub fn is_virtual_device(name: &str) -> bool {
+    let n = name.to_lowercase();
+    VIRTUAL_DEVICE_HINTS.iter().any(|h| n.contains(h))
+}
+
+/// 游戏里该选的麦克风：输出所在虚拟设备的另一端（在输入设备里找与输出构成反馈环的那个）。
+/// 输出是普通扬声器时返回 `None`。
+/// The mic a game should pick: the other end of the virtual device being output to
+/// (the input that would loop with the output). `None` when outputting to a speaker.
+pub fn game_mic_for(output: &str, inputs: &[String]) -> Option<String> {
+    inputs
+        .iter()
+        .find(|i| input_risk(i, output) == Some(InputRisk::FeedbackLoop))
+        .cloned()
 }
 
 /// 判断输入设备能否当麦克风用（基于设备名，适用于各家虚拟音频线与各平台命名）。
@@ -389,10 +493,12 @@ impl InputRisk {
 /// 规则 Rules：
 /// 1. 名称含回录关键词（立体声混音、`Monitor of …`）→ [`InputRisk::SystemLoopback`]。
 ///    Name has a loopback hint (Stereo Mix, `Monitor of …`) → `SystemLoopback`.
-/// 2. 与输出同名（如 VAC 的 `Line 1 (Virtual Audio Cable)`、macOS 的 `BlackHole 2ch`）
-///    → [`InputRisk::FeedbackLoop`]。
-///    Same name as the output (VAC's `Line 1 (Virtual Audio Cable)`, macOS
-///    `BlackHole 2ch`) → `FeedbackLoop`.
+/// 2. 与输出同名且是虚拟设备（如 VAC 的 `Line 1 (Virtual Audio Cable)`、macOS 的
+///    `BlackHole 2ch`）→ [`InputRisk::FeedbackLoop`]。蓝牙耳机的麦克风与听筒也同名，
+///    但不构成反馈环，所以要求是虚拟设备。
+///    Same name as the output and virtual (VAC's `Line 1 (Virtual Audio Cable)`, macOS
+///    `BlackHole 2ch`) → `FeedbackLoop`. Bluetooth headsets share one name for mic and
+///    earpiece without looping, hence the virtual requirement.
 /// 3. 括号内驱动名相同且是虚拟设备（如 `CABLE Input/Output (VB-Audio Virtual Cable)`、
 ///    `VoiceMeeter Input/Output (VB-Audio VoiceMeeter VAIO)`）→ `FeedbackLoop`。
 ///    Same driver name in parentheses and it's a virtual device → `FeedbackLoop`.
@@ -410,7 +516,7 @@ pub fn input_risk(input: &str, output: &str) -> Option<InputRisk> {
     if LOOPBACK_INPUT_HINTS.iter().any(|h| inp.contains(h)) {
         return Some(InputRisk::SystemLoopback);
     }
-    if inp == out {
+    if inp == out && is_virtual(&inp) {
         return Some(InputRisk::FeedbackLoop);
     }
     let same_device = match (driver_part(&inp), driver_part(&out)) {
@@ -538,6 +644,9 @@ mod tests {
         // 真实麦克风 → 虚拟线。Real mic → virtual cable.
         assert_ok("Microphone (WO Mic Device)", cable_in);
         assert_ok("Headset (Bluetooth Hands-Free Audio)", cable_in);
+        // 蓝牙耳机的麦克风与听筒同名，不是反馈环。
+        // A Bluetooth headset's mic and earpiece share a name but don't loop.
+        assert_ok("耳机 (AirPods - Find My)", "耳机 (AirPods - Find My)");
         // 同一块声卡的麦克风与扬声器不是反馈环。A card's own mic + speakers isn't a loop.
         assert_ok(
             "Microphone (Realtek(R) Audio)",
@@ -556,6 +665,29 @@ mod tests {
             "CABLE Output (VB-Audio Virtual Cable)",
             "LG ULTRAGEAR (NVIDIA High Definition Audio)",
         );
+    }
+
+    #[test]
+    fn finds_game_mic_and_virtual_devices() {
+        let inputs = vec![
+            "Microphone (WO Mic Device)".to_string(),
+            "CABLE Output (VB-Audio Virtual Cable)".to_string(),
+        ];
+        // 输出到虚拟线：游戏里选另一端。Output to a cable: the game picks the other end.
+        assert_eq!(
+            game_mic_for("CABLE Input (VB-Audio Virtual Cable)", &inputs).as_deref(),
+            Some("CABLE Output (VB-Audio Virtual Cable)")
+        );
+        // 输出到扬声器：游戏收不到。Output to speakers: nothing for the game.
+        assert_eq!(
+            game_mic_for("LG ULTRAGEAR (NVIDIA High Definition Audio)", &inputs),
+            None
+        );
+        // 硬件麦克风 vs 虚拟设备。Hardware mics vs virtual devices.
+        assert!(is_virtual_device("CABLE Output (VB-Audio Virtual Cable)"));
+        assert!(!is_virtual_device("Microphone (WO Mic Device)"));
+        assert!(!is_virtual_device("Headset (Bluetooth Hands-Free Audio)"));
+        assert!(!is_virtual_device("Microphone (Realtek(R) Audio)"));
     }
 
     #[test]

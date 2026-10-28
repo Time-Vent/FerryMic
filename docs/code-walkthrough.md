@@ -194,6 +194,8 @@ pub trait VariableRateSource: Send {
 - `fill` 的 `speed` 是「每个输出帧前进的源帧数」。源与输出采样率不同时，由调用方乘上
   换算比（见 soundboard 的 `rate_ratio`）。
 - `from_file(path)`：按扩展名选解码器（见 `audio_file.rs`）。
+- `progress()` / `seek_ratio(r)`：读取 / 设置播放进度（0..1，按源帧计），只改相位，实时安全；
+  用于界面进度条与拖动跳转。
 - **语义**：第一阶段倍速 = varispeed（变速变调，像磁带）。保音高 stretch 留第二阶段。
 
 ### `WavFileSource`（`wav_file.rs`）
@@ -332,13 +334,24 @@ let loaded = LoadedSound::load(spec)?;          // 控制侧：读文件 + 解�
 cmd_tx.send(BoardCommand::AddSound(Box::new(loaded)))?;
 ```
 
-- 把「读文件 + 解码」放在控制侧完成，实时线程收到的已经是解码好的 PCM。
+- 把「读文件 + 解码」放在控制侧完成（服务端由加载线程负责），实时线程收到的已经是解码好的 PCM。
 - 加载失败（文件不存在、格式不支持）在这里就返回错误，API 可以直接告诉用户。
+- `decoded_bytes()`：解码后占用的内存，加载线程据此控制预加载总量。
+- `LoadedSound` 可以 `Clone`：只复制 `Arc` 共享的 PCM，切换输出设备时据此把已解码的音效重新装进新的音效板；
+  `with_spec(spec)` 换上最新的设置。
+
+### `PlayMode`
+
+- `{ looping, exclusive }` 两个独立的布尔开关，取代旧的四选一 `TriggerMode`。
+- `From<TriggerMode>`：读旧数据时转换（`Loop` → 循环、`Exclusive` → 独占、其它 → 都关）。
+- 触发逻辑：循环且已在播放 → 停止（再按一下停）；独占 → 先清空其它实例；然后新建实例。
 
 ### `SoundBoard`
 
 - `new(capacity_samples, output_rate)`：预分配 scratch、实例表（`MAX_INSTANCES`）和定义表。
-- `apply_command(cmd)`：在输出回调里执行命令。`Trigger` 只克隆共享 PCM，不分配。
+- `apply_command(cmd)`：在输出回调里执行命令。`Trigger` 只克隆共享 PCM，不分配；
+  `SetMode` 更新定义并就地改正在播放实例的循环标志（不打断播放）；`Seek` 设置该音效所有实例的进度。
+- `for_each_playing(|id, progress|)`：按启动先后回调每个播放实例，供 `PlayingSet` 发布给界面。
 - `fill(out, frames, channels)`：覆盖写 `out`。每个实例按 `speed × rate_ratio` 步进；
   scratch 不够时分块。
 - `fill_instance` / `accumulate`：关联函数（不借 `self`），让调用方可以同时借用
@@ -352,38 +365,78 @@ cmd_tx.send(BoardCommand::AddSound(Box::new(loaded)))?;
 
 | 文件 | 内容 |
 |---|---|
-| `lib.rs` | `ServerConfig`、启动流程 `run()`、监听地址、内嵌前端 `static_handler`、`lan_ip` |
+| `lib.rs` | `ServerConfig`（含宿主钩子 `Hooks`）、启动流程 `run()`、`Control`（关闭询问）、内嵌前端 `static_handler`、`lan_ip` |
 | `main.rs` | 浏览器版入口：`ServerConfig::from_env()` → `run()` |
-| `api.rs` | `AppState` + 全部 HTTP 处理函数 |
-| `library.rs` | `Library`：音效库持久化、导入文件路径、运行时信息 |
-| `audio.rs` | `start_audio`：解析输出设备、启动麦克风线程、构建输出回调；`MicReader`、`PlayingSet` |
-| `mic.rs` | `MicControl`（原子量参数 + 状态）、麦克风线程、`MicCapture`、`input_risk` |
-| `settings.rs` | `SettingsStore`：读写 `settings.json`；`data_dir()` |
-| `hotkeys.rs` | 全局热键线程（Win32 消息循环 + 绑定请求） |
+| `api.rs` | `AppState` + 全部 HTTP 处理函数；`apply_diff` 把扫描结果同步到加载与快捷键 |
+| `library.rs` | `Library`：音效库 = 磁盘文件夹（扫描、文件夹操作、`.soundbridge.json`、旧版迁移） |
+| `loader.rs` | `Player`：加载线程（预加载 + 按需加载）与唯一触发入口 |
+| `audio.rs` | `start_audio`：输出线程（打开 / 切换输出设备）、构建输出回调；`describe_output`、`MicReader`、`PlayingSet` |
+| `mic.rs` | `MicControl`（原子量参数 + 状态）、麦克风线程、`auto_pick`、`MicCapture`、`input_risk` |
+| `monitor.rs` | 试听：`MonitorControl`、试听线程、`MonitorTap`（主回调侧）、`MonitorReader`（试听回调侧） |
+| `remote.rs` | `RemoteServer`：手机遥控监听的启动 / 停止、访问码中间件 `require_token`、`qr_svg` |
+| `settings.rs` | `SettingsStore`：读写 `settings.json`；`data_dir()`（按平台）；`CloseAction` |
+| `i18n.rs` | 界面语言：`apply` / `is_en`，宏 `tr!` / `trf!` 按语言生成提示与错误 |
+| `hotkeys.rs` | 全局热键线程（Win32 消息循环 + 绑定请求），按下时调用 `Player::trigger` |
+| `virtual_mic.rs` | Linux 虚拟麦克风：`pactl` 创建 / 接管 / 卸载模块 |
 
 ### 启动顺序（`run`）
 
-1. 读设置（`SettingsStore`）和音效库（`Library::load`）。
-2. 决定初始麦克风：`ServerConfig.input_device` > 上次选择 > 系统默认。
-3. `audio::start_audio(...)`：打开输出设备 → `spawn_mic_thread` → 构建输出回调。
-4. 启动热键线程；逐个解码音效库里的音效交给音频线程并绑定快捷键（失败的标记 `error`）。
-5. 按 `lan_remote` 决定监听 `127.0.0.1` 还是 `0.0.0.0`，绑定端口（App 允许回退随机端口）。
-6. 组装 `AppState`，调用 `on_ready` 通知宿主，开始服务。
+1. 读设置（`SettingsStore`）并应用界面语言（`i18n::apply`），决定输出设备：`ServerConfig.output_device` > 上次选择 > 系统默认。
+2. Linux 且未指定输出设备时，`VirtualMic::setup()` 创建虚拟麦克风并设置 `PULSE_SINK` / `PIPEWIRE_NODE`
+   （必须在打开音频流之前）。
+3. `migrate_v1` 迁移旧版数据，`Library::open(root)` 打开并扫描音效库。
+4. `Player::new` 启动加载线程；建 `MicControl`、`MonitorControl`；
+   初始麦克风：`ServerConfig.input_device` > 上次选择 > 自动。
+5. `audio::start_audio(...)`：启动输出线程（打开输出设备、构建输出回调）→ `spawn_mic_thread` →
+   `spawn_monitor_thread`。
+6. 启动热键线程；为每个音效绑定快捷键并排队预加载（不阻塞启动）。
+7. 主界面只监听 `127.0.0.1`，绑定端口（App 允许回退随机端口）。
+8. 建 `RemoteServer`（访问码来自设置，没有就生成），端口 = 主端口 + 1；
+   设置 `lan_remote` 或 `SOUNDBRIDGE_LAN=1` 时立即启动。
+9. 组装 `AppState`（含 `hooks`、`close_prompt`），把路由交给 `RemoteServer`，调用 `on_ready` 通知宿主，开始服务。
 
-**为什么 `run` 返回的 future 不是 `Send`**：它持有音频输出流句柄（cpal 流在部分平台不能跨线程），
-所以宿主要在专用线程上 `block_on`，而不是 `tokio::spawn`。
+**输出线程**：cpal 的流句柄在部分平台不能跨线程，所以主输出流由专用线程 `soundbridge-output` 持有，
+切换输出时也在这个线程里关旧流、开新流（`OutputRequest::Select { device, reply }`）。
+宿主仍在专用线程上 `block_on(run(...))`。
+
+### `RemoteServer`（`remote.rs`）
+
+- `start()`：绑定 `0.0.0.0:preferred_port`（被占用则随机端口），用 `with_graceful_shutdown` 跑同一个 `Router`；
+  `stop()`：发关闭信号，端口随即释放。开关都不用重启。
+- `require_token`：查询参数 `t` 或 Cookie `sb_token` 必须等于访问码（带 `t` 时写 Cookie）；
+  `DESKTOP_ONLY` 列表里的接口对手机只允许 GET。
+- `status()`：`{enabled, url, port, error}`，`url` = `http://<局域网 IP>:<端口>/?t=<访问码>`。
+
+### 宿主钩子与关闭询问（`lib.rs`）
+
+- `Hooks { on_settings, on_window_action }`：服务库不依赖 Tauri，桌面 App 通过钩子接收「设置变了」
+  （用来给图标着色）和「关闭询问的回答」（隐藏到托盘 / 退出）。
+- `Control::request_close()`：置位 `close_prompt` 并返回之前是否已置位——已经在问了还再点 ×，
+  说明界面没响应，外壳直接退出。界面经 `/api/live` 看到标记后弹框，`POST /api/window` 回答并清除标记。
 
 ### `Library`（`library.rs`）
 
-- `load(data_dir)`：读 `library.json`，`next_id` 至少为现有最大 id + 1。
-- `alloc_id` / `insert` / `update` / `remove`：每次修改立即 `save`（临时文件 + 改名）。
-- `remove` 只删除 `sounds/` 目录里的文件（`owns`），按路径添加的外部文件不会被删。
-- `import_path(id, name)`：`sounds/<id>-<sanitize_file_name(name)>`，防止 `../` 等路径穿越。
+- `open(root)`：建目录、读 `.soundbridge.json`、`scan`。
+- `scan`：递归收集文件夹与音频文件 → 为新文件分配 id → 去掉已不存在的条目 → 写回设置文件 →
+  返回 `ScanDiff { added, removed }`。
+- `create_folder` / `rename_folder` / `delete_folder`、`import` / `rename_sound` / `move_sound` / `delete_sound`：
+  先改磁盘，再迁移设置键（`rekey_prefix` / `move_entry`），最后 `scan`。所有输入路径经 `clean_rel` 清理。
+- `set_root(new, move_contents)`：可选把旧库内容移过去（`move_dir_contents`，跨盘时复制后删除）。
+- `migrate_v1(data_dir, root)`：旧版 `library.json` → 新音效库，详见架构文档 §7.1。
+
+### `Player`（`loader.rs`）
+
+- `trigger(id)`：已加载则直接发 `Trigger`；否则把 `LoadAndTrigger` 放进优先队列。
+- `preload(id)` / `install(loaded)` / `unload(id)` / `unload_all()` / `send(cmd)`。
+- 加载线程 `Worker::run`：先取优先队列，空了再用 `select!` 同时等两个队列；预加载累计超过
+  `PRELOAD_BUDGET_BYTES` 后跳过预加载任务。每次都从 `Library::spec` 取最新定义再解码。
+
+- `reinstall_all()`：切换输出后把缓存里所有已解码音效重新装进新的音效板。
 
 ### `PlayingSet`（`audio.rs`）
 
-- 输出回调每次 `fill` 后调用 `publish(&board)`，把播放实例的音效 id 写进固定的原子槽位，0 表示空。
-- `/api/live` 读取 `ids()`（去重排序）给界面高亮。无锁、不分配，实时安全。
+- 输出回调每次 `fill` 后调用 `publish(&board)`，把播放实例的（音效 id, 进度）写进两组固定的原子槽位，id 为 0 表示空。
+- `/api/live` 读取 `snapshot()`：每个音效一项，多个实例时取最新的进度。无锁、不分配，实时安全。
 
 ### 热键线程（`hotkeys.rs`）
 
@@ -402,7 +455,8 @@ cmd_tx.send(BoardCommand::AddSound(Box::new(loaded)))?;
 loop {
     recv_timeout(1s) {
         Select{device}  → open(device)：成功才替换旧流 + 记住选择；结果回给 API
-        超时            → watch()：断开则重连；跟随默认时检测默认设备变化
+        OutputChanged   → 按新输出的采样率重开、重新做反馈环检查
+        超时            → watch()：断开则重连；自动模式下检测默认设备变化
     }
     释放输出回调送回的旧环
 }
@@ -411,6 +465,7 @@ loop {
 - `open(device)`：解析设备 → `input_risk` 检查 → 新建环 + `MicCapture` → `build_input` →
   把消费端经 `cons_tx` 交给输出回调 → 替换旧流。任一步失败都保留旧流。
 - `set_unavailable(note)`：同一原因只记一次日志，避免每秒刷屏。
+- `auto_pick()`：选择为「自动」时，系统默认录音设备是硬件麦克风就用它，否则取第一个硬件麦克风。
 
 ### `input_risk(input, output)`（输入设备检查）
 
@@ -419,7 +474,8 @@ loop {
 - **为什么只看名称**：各平台没有统一 API 能查出「这个录音端点对应哪个播放端点」，
   而虚拟音频线的命名很规律（「端点 (驱动)」、两端同名等）。
 - **为什么要求「是虚拟设备」**：同一块声卡的麦克风和扬声器驱动名也相同（如
-  `Realtek(R) Audio`），但它们不是反馈环，所以只有驱动名命中虚拟关键词才判反馈环。
+  `Realtek(R) Audio`），蓝牙耳机的麦克风与听筒甚至完全同名（如 `耳机 (AirPods)`），
+  但它们都不是反馈环，所以只有命中虚拟关键词才判反馈环。
 - 规则和关键词表见 `mic.rs` 顶部常量与 [音效板架构 §6.2](soundboard-architecture.md)。
 
 ### `MicCapture`（输入回调侧）与 `MicReader`（输出回调侧）
@@ -427,6 +483,15 @@ loop {
 - `MicCapture::push`：下混单声道 → 线性插值重采样（`step = 输入采样率 / 输出采样率`）→ 写环。
 - `MicReader::mix_into`：先收新环（换设备）→ 漂移裁剪 → 抖动缓冲（primed）→ 按增益叠加到
   各声道 → 更新电平。
+
+### 试听（`monitor.rs`）
+
+- `MonitorTap::tap`（主输出回调，在叠加麦克风之前）：把只含音效的缓冲转成立体声写环；先收试听线程送来的新环，没有环（未开启或不需要试听）时直接返回。
+- `MonitorReader::fill`（试听回调）：收新环 → 漂移裁剪（积压 > 60 ms 丢弃）→ 抖动缓冲（约 20 ms）→
+  按 `step = 主输出采样率 / 试听采样率` 线性插值 → 乘试听音量。第一帧同时作为插值的前后两点，
+  避免开头出现一个 0 样点。
+- 试听线程：`Configure { enabled, device }` 开关 / 换设备；`MainChanged` 时主输出变了，重新判断
+  是否需要试听（主输出是扬声器、或试听设备与主输出相同时不打开）。
 
 ---
 
@@ -436,7 +501,7 @@ loop {
 
 | 文件 | 内容 |
 |---|---|
-| `src/main.rs` | Tauri 入口：单实例插件、启动服务、创建窗口 |
+| `src/main.rs` | Tauri 入口：单实例插件、启动服务（传入钩子）、创建窗口、托盘、关闭询问、图标着色 |
 | `tauri.conf.json` | 产品名、标识符、图标；窗口在代码里创建（`windows: []`） |
 | `loading/index.html` | 服务启动失败时显示的错误页 |
 | `icons/` | 应用图标（`icon.ico` 含 16/32/48/256 尺寸） |
@@ -446,9 +511,13 @@ loop {
 - `setup`：服务就绪则窗口加载 `WebviewUrl::External("http://127.0.0.1:<端口>")`，
   否则加载内置错误页。
 - 窗口参数：1080×700、最小 760×520、背景色与界面一致（防白屏闪烁）、关闭 Tauri 拖放拦截。
+- `build_tray`：托盘图标 + 菜单（打开 / 退出，按界面语言；`on_settings` 时 `apply_tray_menu` 重建），左键单击 `show_main`。
+- `on_window_event(CloseRequested)`：按设置 `close_action` 隐藏 / 退出 / 询问（`Control::request_close`）。
+- `tinted_icon(accent)`：内置 `icons/icon.png` 逐像素转 HSL，色相旋转「主题色色相 − 246.1°」，
+  饱和度很低的像素（白色图案）不动；钩子在后台线程触发，图标在主线程（`run_on_main_thread`）设置。
 - `#![windows_subsystem = "windows"]`：发布版不弹控制台。
-- 构建：`build-app.ps1`（前端 → `cargo build --release -p soundbridge-app` → 复制 exe 与
-  `WebView2Loader.dll` 到 `dist-app/SoundBridge/`）。
+- 构建：Windows 用 `build-app.ps1`（前端 → `cargo build --release -p soundbridge-app` → 复制 exe 与
+  `WebView2Loader.dll` 到 `dist-app/SoundBridge/`）；Linux 用 `build-app.sh`（同样流程，产物为单个可执行文件）。
 
 ---
 

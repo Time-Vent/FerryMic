@@ -45,10 +45,16 @@ Windows 系统声音采集若混写「抓整个系统混音」与「抓指定设
 输出会被录回自身。`apps/server/src/mic.rs` 的 `input_risk(input, output)` 在打开麦克风前
 按设备名检查，**不绑定任何厂商**：
 
-- `FeedbackLoop`：与输出同名，或括号内驱动名相同且是虚拟设备（VB-Cable、VoiceMeeter、
-  VAC、BlackHole 等），或无括号时去掉方向词后同名且是虚拟设备。
+- `FeedbackLoop`：与输出同名且是虚拟设备，或括号内驱动名相同且是虚拟设备（VB-Cable、VoiceMeeter、
+  VAC、BlackHole 等），或无括号时去掉方向词后同名且是虚拟设备。蓝牙耳机的麦克风与听筒同名，
+  但不是虚拟设备，因此不会被误判。
 - `SystemLoopback`：立体声混音 / What U Hear / Linux `Monitor of …` 等回录设备，会把游戏等
   所有正在播放的声音录进麦克风，同样拒绝。
 
-命中时拒绝打开并从设备列表隐藏。这是名称启发式，命名特殊的虚拟线可能漏判；单元测试见
-`mic.rs` 的 `detects_feedback_loop_across_vendors` 等。
+命中时拒绝打开；「自动」选择麦克风时也会跳过这些设备和其它虚拟设备，只选硬件麦克风。
+切换输出设备后，麦克风线程会按新输出重新检查。同一条规则还用来推算「游戏里该选哪个麦克风」
+（`game_mic_for`：与输出构成反馈环的那个输入就是虚拟线的另一端）。
+这是名称启发式，命名特殊的虚拟线可能漏判；单元测试见 `mic.rs` 的
+`detects_feedback_loop_across_vendors`、`allows_real_mics_and_different_cables` 等。
+
+**试听不构成反馈环**：试听流只放音效、不放麦克风；主输出本身是扬声器、或试听设备与主输出相同时不打开。

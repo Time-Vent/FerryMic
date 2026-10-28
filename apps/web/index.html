@@ -5,22 +5,49 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
     <title>SoundBridge</title>
+    <script>
+      // 尽早套用上次的主题，避免启动时闪一下默认配色。
+      // Apply the last theme as early as possible to avoid a flash of the default colours.
+      try {
+        const t = JSON.parse(localStorage.getItem('sb-theme') || 'null');
+        if (t && t.mode && t.mode !== 'system') document.documentElement.dataset.theme = t.mode;
+        if (t && t.vars) for (const k in t.vars) document.documentElement.style.setProperty(k, t.vars[k]);
+      } catch (e) {}
+    </script>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <!-- 应用外框：左侧导航栏 + 主区域。App shell: left rail + main area. -->
+    <!-- 应用外框：导航栏 + 文件夹栏 + 主区域。App shell: rail + folder sidebar + main. -->
     <div class="app">
       <nav class="rail" aria-label="导航">
         <div class="brand" data-icon="logo" title="SoundBridge"></div>
         <button class="rail-btn active" data-icon="grid" title="音效库" aria-label="音效库"></button>
         <div class="rail-spacer"></div>
+        <!-- 手机遥控开关（点击打开二维码面板）。Phone remote (opens the QR panel). -->
+        <button class="rail-btn remote-btn" id="remote-btn" data-icon="phone" title="手机遥控" aria-label="手机遥控"><i class="dot"></i></button>
+        <button class="rail-btn" id="open-help" data-icon="help" title="使用说明" aria-label="使用说明"></button>
         <button class="rail-btn" id="open-settings" data-icon="settings" title="设置" aria-label="设置"></button>
       </nav>
+
+      <!-- 文件夹栏。Folder sidebar. -->
+      <aside class="sidebar" aria-label="文件夹">
+        <div class="sidebar-head">
+          <span>音效库</span>
+          <div class="sidebar-actions">
+            <button class="icon-btn small" id="new-folder" data-icon="folderPlus" title="新建文件夹" aria-label="新建文件夹"></button>
+            <button class="icon-btn small" id="rescan" data-icon="refresh" title="重新扫描文件夹" aria-label="重新扫描"></button>
+          </div>
+        </div>
+        <div id="folder-tree" class="folder-tree" role="tree"></div>
+        <button class="sidebar-foot" id="open-library" title="在文件管理器中打开音效库文件夹">
+          <span data-icon="external"></span><span id="library-path" class="path"></span>
+        </button>
+      </aside>
 
       <main class="main">
         <header class="toolbar">
           <div class="title">
-            <h1>音效库</h1>
+            <h1 id="view-title">全部音效</h1>
             <span id="sound-count" class="count"></span>
           </div>
           <label class="search">
@@ -39,6 +66,9 @@
           <input id="file-input" type="file" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a,.aac" multiple hidden />
         </header>
 
+        <!-- 窄屏时的文件夹切换条。Folder chips on narrow screens. -->
+        <div id="folder-chips" class="folder-chips mobile-only"></div>
+
         <section id="grid" class="grid" aria-live="polite"></section>
 
         <!-- 底部麦克风条。Bottom mic bar. -->
@@ -46,29 +76,39 @@
           <button id="mic-mute" class="mic-toggle" aria-label="麦克风静音"></button>
           <div class="mic-info">
             <div class="mic-line">
-              <span id="mic-name" class="mic-name">麦克风</span>
+              <span class="mic-label">你的麦克风</span>
+              <span id="mic-name" class="mic-name">—</span>
               <span id="mic-hint" class="mic-hint"></span>
             </div>
             <div class="meter"><div id="mic-meter" class="meter-fill"></div></div>
           </div>
-          <label class="mic-volume" title="麦克风音量">
+          <label class="mic-volume" title="麦克风音量（双击恢复 0 dB）">
             <input id="mic-gain" type="range" min="-30" max="24" step="1" value="0" />
             <span id="mic-gain-value" class="value">0 dB</span>
           </label>
-          <div class="output" title="输出设备">
-            <span data-icon="speaker"></span>
-            <span id="output-name">—</span>
-          </div>
+          <!-- 试听开关：音效同时在耳机里播放。Monitor switch: also hear the effects. -->
+          <button id="monitor-btn" class="mixer-btn" data-icon="headphones" title="试听：音效同时在耳机 / 扬声器里播放"></button>
+          <!-- 发送目标：游戏里该选哪个麦克风。Send target: which mic to pick in games. -->
+          <button id="send-target" class="send-target" title="混音发送到哪里（点击修改）">
+            <span class="send-icon"></span>
+            <span class="send-text">
+              <small id="send-label">游戏麦克风选</small>
+              <b id="send-name">—</b>
+            </span>
+          </button>
         </footer>
       </main>
     </div>
+
+    <!-- 弹出层（音量 / 倍速 / 菜单共用）。Popover (shared by volume / speed / menus). -->
+    <div id="popover" class="popover" hidden></div>
 
     <!-- 拖入文件时的遮罩。Overlay while dragging files in. -->
     <div id="drop-overlay" class="drop-overlay" hidden>
       <div class="drop-card">
         <span data-icon="upload"></span>
-        <p>松开即可导入音效</p>
-        <small>支持 MP3 / WAV / FLAC / OGG / AAC</small>
+        <p id="drop-target">松开即可导入音效</p>
+        <small>支持 MP3 / WAV / FLAC / OGG / M4A / AAC</small>
       </div>
     </div>
 
@@ -80,19 +120,26 @@
           <button type="button" class="icon-btn" data-close data-icon="close" aria-label="关闭"></button>
         </header>
         <div class="dialog-body">
-          <label class="field">
-            <span>名称</span>
-            <input name="name" required maxlength="60" />
-          </label>
+          <div class="field-row">
+            <label class="field grow">
+              <span>名称（即文件名）</span>
+              <input name="name" required maxlength="80" />
+            </label>
+            <label class="field">
+              <span>文件夹</span>
+              <select name="folder" id="edit-folder"></select>
+            </label>
+          </div>
           <div class="field">
-            <span>触发方式</span>
-            <div class="segmented" id="mode-group" role="radiogroup">
-              <button type="button" data-mode="OneShot">点按</button>
-              <button type="button" data-mode="Loop">循环</button>
-              <button type="button" data-mode="Exclusive">独占</button>
-              <button type="button" data-mode="Overlap">叠加</button>
-            </div>
-            <small id="mode-desc" class="hint"></small>
+            <span>播放方式</span>
+            <label class="switch-row">
+              <span>循环播放<small class="hint inline">再按一下停止；关闭则每次播一遍</small></span>
+              <input type="checkbox" class="switch" id="edit-looping" />
+            </label>
+            <label class="switch-row">
+              <span>独占<small class="hint inline">播放时打断其它音效；关闭则可叠加</small></span>
+              <input type="checkbox" class="switch" id="edit-exclusive" />
+            </label>
           </div>
           <label class="field">
             <span>音量 <output id="gain-out" class="value"></output></span>
@@ -124,6 +171,24 @@
       </form>
     </dialog>
 
+    <!-- 通用输入 / 确认对话框。Generic prompt / confirm dialog. -->
+    <dialog id="prompt-dialog" class="dialog small">
+      <form method="dialog" id="prompt-form">
+        <header class="dialog-head">
+          <h2 id="prompt-title"></h2>
+        </header>
+        <div class="dialog-body">
+          <p id="prompt-message" class="hint"></p>
+          <input id="prompt-input" class="text-input" maxlength="80" />
+        </div>
+        <footer class="dialog-foot">
+          <div class="spacer"></div>
+          <button type="button" class="btn ghost" data-close>取消</button>
+          <button type="submit" id="prompt-ok" class="btn primary">确定</button>
+        </footer>
+      </form>
+    </dialog>
+
     <!-- 设置。Settings. -->
     <dialog id="settings-dialog" class="dialog settings">
       <header class="dialog-head">
@@ -132,37 +197,214 @@
       </header>
       <div class="dialog-body">
         <section class="setting-group">
-          <h3><span data-icon="mic"></span>麦克风</h3>
-          <div class="setting-row">
-            <select id="mic-select" aria-label="麦克风设备"></select>
-            <button type="button" id="mic-refresh" class="icon-btn" data-icon="refresh" title="刷新设备列表" aria-label="刷新"></button>
+          <h3><span data-icon="palette"></span>外观</h3>
+          <div class="segmented three" id="theme-mode" role="radiogroup">
+            <button type="button" data-theme-mode="system">跟随系统</button>
+            <button type="button" data-theme-mode="dark">深色</button>
+            <button type="button" data-theme-mode="light">浅色</button>
           </div>
-          <small id="mic-status" class="hint"></small>
-          <small class="hint">手机 mic 软件、蓝牙耳机连上后会自动出现；设备断开后会自动重连。</small>
-        </section>
-
-        <section class="setting-group">
-          <h3><span data-icon="speaker"></span>输出</h3>
-          <p id="settings-output" class="setting-value"></p>
-          <small class="hint">游戏 / 语音软件里把麦克风设为该虚拟音频线的另一端（如 CABLE Output）。</small>
-        </section>
-
-        <section class="setting-group">
-          <h3><span data-icon="phone"></span>手机遥控</h3>
-          <label class="switch-row">
-            <span>允许同一局域网的手机打开界面触发音效</span>
-            <input id="lan-toggle" type="checkbox" class="switch" />
+          <div class="swatches" id="accent-swatches">
+            <label class="swatch custom" title="自定义颜色">
+              <input type="color" id="accent-custom" />
+            </label>
+          </div>
+          <small class="hint">主题色用于按钮、播放中的高亮与进度条。</small>
+          <label class="switch-row app-only">
+            <span>任务栏 / 托盘图标也跟随主题色</span>
+            <input id="tint-toggle" type="checkbox" class="switch" />
           </label>
-          <p id="lan-url" class="setting-value"></p>
-          <small id="lan-note" class="hint"></small>
+          <!-- 语言：标签固定中英双语，任何语言下都能找到。
+               Language: the label stays bilingual so it can always be found. -->
+          <label class="field" data-i18n-skip>
+            <span>语言 · Language</span>
+            <select id="language-select">
+              <option value="system">跟随系统 · System</option>
+              <option value="zh-CN">简体中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="setting-group">
+          <h3><span data-icon="folder"></span>音效库位置</h3>
+          <div class="setting-row">
+            <input id="library-input" class="text-input" spellcheck="false" />
+            <button type="button" id="library-browse" class="btn ghost small">浏览…</button>
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="library-move" />
+            <span>把当前音效库里的文件一起移动过去</span>
+          </label>
+          <div class="setting-row end">
+            <button type="button" id="library-open" class="btn ghost small"><span data-icon="external"></span>打开文件夹</button>
+            <button type="button" id="library-apply" class="btn primary small">应用</button>
+          </div>
+          <small class="hint">音效库就是这个文件夹：子文件夹即分类，在资源管理器里放进去的音频文件，点左侧「刷新」后出现。</small>
+        </section>
+
+        <!-- 音频链路：你的麦克风 → 混音 → 发送给游戏；另一路试听给自己。
+             Audio chain: your mic → mix → sent to games; plus a monitor for yourself. -->
+        <section class="setting-group" id="audio-section">
+          <h3><span data-icon="send"></span>音频链路</h3>
+          <div class="chain">
+            <div class="chain-node"><span data-icon="mic"></span><small>你的麦克风</small></div>
+            <span class="chain-arrow">→</span>
+            <div class="chain-node accent"><span data-icon="logo"></span><small>混音 + 音效</small></div>
+            <span class="chain-arrow">→</span>
+            <div class="chain-node"><span data-icon="send"></span><small>虚拟麦克风</small></div>
+            <span class="chain-arrow">→</span>
+            <div class="chain-node"><span data-icon="grid"></span><small>游戏 / 语音</small></div>
+          </div>
+
+          <div class="field">
+            <span>你的麦克风（输入）</span>
+            <div class="setting-row">
+              <select id="mic-select" aria-label="你的麦克风"></select>
+              <button type="button" id="mic-refresh" class="icon-btn" data-icon="refresh" title="刷新设备列表" aria-label="刷新"></button>
+            </div>
+            <small id="mic-status" class="hint"></small>
+          </div>
+
+          <div class="field">
+            <span>发送给游戏（输出）</span>
+            <select id="output-select" aria-label="发送给游戏"></select>
+            <div id="game-mic-hint" class="callout"></div>
+          </div>
+
+          <div id="vmic-box" hidden>
+            <label class="switch-row">
+              <span>自动创建虚拟麦克风（重启生效）</span>
+              <input id="vmic-toggle" type="checkbox" class="switch" />
+            </label>
+            <small id="vmic-status" class="hint"></small>
+          </div>
+
+          <div class="field">
+            <span>试听（自己也听到音效）</span>
+            <label class="switch-row">
+              <span>音效同时在耳机 / 扬声器里播放<small class="hint inline">不包含你自己的声音</small></span>
+              <input id="monitor-toggle" type="checkbox" class="switch" />
+            </label>
+            <div class="setting-row">
+              <select id="monitor-select" aria-label="试听设备"></select>
+            </div>
+            <label class="mic-volume wide" title="试听音量（双击恢复 0 dB）">
+              <input id="monitor-gain" type="range" min="-40" max="12" step="1" value="0" />
+              <span id="monitor-gain-value" class="value">0 dB</span>
+            </label>
+            <small id="monitor-status" class="hint"></small>
+          </div>
+        </section>
+
+        <section class="setting-group app-only">
+          <h3><span data-icon="monitor"></span>窗口</h3>
+          <div class="field">
+            <span>点击关闭按钮时</span>
+            <div class="segmented three" id="close-action" role="radiogroup">
+              <button type="button" data-close-action="ask">每次询问</button>
+              <button type="button" data-close-action="tray">最小化到托盘</button>
+              <button type="button" data-close-action="quit">退出</button>
+            </div>
+            <small class="hint">最小化到托盘后音效、快捷键、手机遥控照常可用；单击托盘图标重新打开。</small>
+          </div>
+        </section>
+
+        <section class="setting-group" id="help-section">
+          <h3><span data-icon="help"></span>使用说明</h3>
+          <details open>
+            <summary>基础操作</summary>
+            <ul class="help-list" data-i18n-html="help-basic">
+              <li><b>导入</b>：把音频文件拖进窗口（或直接拖到左侧某个文件夹上），或点右上角「导入音效」。文件会保存进音效库文件夹。</li>
+              <li><b>播放</b>：点卡片即可播放；播放中拖动卡片底部的进度条可跳转，鼠标移到圆形按钮上点击可停止；右上角「全部停止」。</li>
+              <li><b>卡片按钮</b>：循环图标切换循环 / 单次（循环时再按一下卡片停止）；独占图标（一个圆点）/ 叠加图标（两个交叠的圆）切换播放时是否打断其它音效；音量点一下弹出竖向滑条；倍速点一下换一档（右键反向）。</li>
+              <li><b>快捷键</b>：点卡片右上角「⋯」打开编辑，点快捷键框后直接按组合键；游戏全屏时也能触发。</li>
+              <li><b>文件夹</b>：左侧新建、重命名文件夹；把卡片拖到文件夹上即可移动。在资源管理器里改了文件后点左侧「刷新」。</li>
+              <li><b>你的麦克风</b>：底部左侧可静音、调音量、看电平；本页「音频链路」里选择设备（默认自动选硬件麦克风）。</li>
+              <li><b>发送给游戏</b>：底部右侧显示游戏里该选哪个麦克风；本页「音频链路」里选择虚拟音频线。</li>
+              <li><b>试听</b>：混音发给游戏后自己听不到，打开底部的耳机按钮，音效会同时在耳机里播放（不含你自己的声音）。</li>
+              <li><b>手机遥控</b>：左侧手机按钮一键开关，手机扫二维码即可打开同一界面。</li>
+            </ul>
+          </details>
+          <details id="help-platforms">
+            <summary>各平台接入游戏 / 语音软件</summary>
+            <div class="platform" data-platform="windows">
+              <h4>Windows <span class="badge-current">当前系统</span></h4>
+              <ol class="help-list" data-i18n-html="help-windows">
+                <li>安装虚拟音频线，如 VB-Cable（免费）。</li>
+                <li>本页「音频链路 → 发送给游戏」选 <code>CABLE Input</code>。</li>
+                <li>游戏 / Discord / 会议软件的麦克风选 <code>CABLE Output</code>（底部右侧会提示）。</li>
+                <li>打开「试听」就能在耳机里听到自己放的音效。</li>
+                <li>Windows「声音设置」里默认播放设备保持为耳机或扬声器，不要设成 CABLE Input，否则游戏声音也会进麦克风。</li>
+              </ol>
+            </div>
+            <div class="platform" data-platform="linux">
+              <h4>Linux <span class="badge-current">当前系统</span></h4>
+              <ol class="help-list" data-i18n-html="help-linux">
+                <li>需要 PipeWire（含 pipewire-pulse）或 PulseAudio，以及 <code>pactl</code> 命令（pulseaudio-utils）。</li>
+                <li>SoundBridge 启动时自动创建虚拟麦克风 <code>SoundBridge-Microphone</code>，退出时自动移除。</li>
+                <li>游戏 / Discord 的麦克风选 <code>SoundBridge-Microphone</code>。</li>
+                <li>全局快捷键需要 X11 会话（Wayland 下请改用 X11 会话，或用界面 / 手机遥控触发）。</li>
+              </ol>
+            </div>
+            <div class="platform" data-platform="macos">
+              <h4>macOS <span class="badge-current">当前系统</span></h4>
+              <ol class="help-list" data-i18n-html="help-macos">
+                <li>安装虚拟音频设备，如 BlackHole 2ch。</li>
+                <li>本页「音频链路 → 发送给游戏」选 <code>BlackHole 2ch</code>。</li>
+                <li>游戏 / 语音软件的麦克风选 <code>BlackHole 2ch</code>。首次使用需在「隐私与安全性」中允许麦克风权限。</li>
+              </ol>
+            </div>
+          </details>
         </section>
 
         <section class="setting-group">
           <h3><span data-icon="info"></span>关于</h3>
           <p class="setting-value">SoundBridge <span id="app-version"></span></p>
-          <small class="hint">数据目录：<span id="data-dir"></span></small>
+          <small class="hint">设置保存在：<span id="data-dir"></span></small>
         </section>
       </div>
+    </dialog>
+
+    <!-- 手机遥控面板。Phone-remote panel. -->
+    <dialog id="remote-dialog" class="dialog small">
+      <header class="dialog-head">
+        <h2>手机遥控</h2>
+        <button type="button" class="icon-btn" data-close data-icon="close" aria-label="关闭"></button>
+      </header>
+      <div class="dialog-body">
+        <label class="switch-row">
+          <span>允许同一 Wi-Fi 下的手机打开界面</span>
+          <input id="remote-toggle" type="checkbox" class="switch" />
+        </label>
+        <div id="remote-on" class="remote-on" hidden>
+          <img id="remote-qr" class="qr" alt="手机扫码打开" />
+          <p class="hint center">用手机相机或微信扫一扫</p>
+          <p id="remote-url" class="remote-url"></p>
+          <button type="button" id="remote-regen" class="btn ghost small">重新生成访问码</button>
+        </div>
+        <p id="remote-off" class="hint">开启后显示二维码。网址带有访问码，没扫过码的设备打不开；可随时关闭。</p>
+        <p id="remote-error" class="hint warn"></p>
+      </div>
+    </dialog>
+
+    <!-- 关闭窗口询问（桌面 App）。Close prompt (desktop app). -->
+    <dialog id="close-dialog" class="dialog small">
+      <header class="dialog-head">
+        <h2>关闭 SoundBridge？</h2>
+      </header>
+      <div class="dialog-body">
+        <p class="hint">最小化到托盘后，音效、快捷键和手机遥控照常可用，单击托盘图标重新打开。</p>
+        <label class="check-row">
+          <input type="checkbox" id="close-remember" />
+          <span>记住我的选择（可在设置 → 窗口里修改）</span>
+        </label>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" id="close-cancel" class="btn ghost">取消</button>
+        <div class="spacer"></div>
+        <button type="button" id="close-quit" class="btn ghost danger">退出</button>
+        <button type="button" id="close-tray" class="btn primary">最小化到托盘</button>
+      </footer>
     </dialog>
 
     <div id="toasts" class="toasts" aria-live="assertive"></div>

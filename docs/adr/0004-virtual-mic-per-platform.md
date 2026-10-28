@@ -14,6 +14,11 @@
 枚举系统渲染端点，让用户选择声卡或已安装的虚拟音频线，经 `AudioBackend::open_output`
 打开，其回调即主时钟。自研 WDM 驱动放后续阶段。
 
+> **已实现**：设置 →「音频链路」→「发送给游戏」在运行中切换输出目标（`POST /api/output`，
+> 不用重启，选择会被记住）。输出按名称分为虚拟音频线 / 扬声器两组，并推算游戏里该选的麦克风
+> （虚拟线的另一端，如 `CABLE Input` → `CABLE Output`），界面底部直接显示。
+> 输出到虚拟线时自己听不到音效，所以另有「试听」：只含音效的混音同时放到耳机 / 扬声器（第二个输出流）。
+
 **macOS（第二阶段）**：AudioServerPlugin（HAL 用户态插件），**不是** DriverKit
 （AudioDriverKit 仅面向物理设备）。进入前必须实测 tympan-aspl 能否加载。安装成本：
 管理员权限写 HAL 目录、签名公证、重启 coreaudiod。无权限时 Core Audio 返回静音而非
@@ -21,6 +26,12 @@
 
 **Linux（第二阶段）**：优先 PipeWire（`PW_KEY_MEDIA_CLASS = "Audio/Source"` 或
 filter-chain），PulseAudio module-pipe-source 兜底。
+
+> **已实现（简化路径）**：`apps/server/src/virtual_mic.rs` 通过 `pactl` 加载
+> `module-null-sink`（`soundbridge_mix`）+ `module-remap-source`（`SoundBridge-Microphone`），
+> PipeWire（pipewire-pulse）与 PulseAudio 通用；本进程经 `PULSE_SINK` / `PIPEWIRE_NODE` 环境变量把
+> 播放导入虚拟输出，退出时卸载模块，遗留模块下次启动时接管。尚未在真实 Linux 上实测。
+> 直接使用 PipeWire 原生 API 创建 `Audio/Source` 节点仍可作为后续优化。
 
 **移动端**：不提供系统级虚拟麦克风。iOS 沙箱与音频进程模型不允许第三方应用创建全局
 虚拟输入设备；Android 受 AudioFlinger 与厂商策略限制。移动端定位为独立产品形态

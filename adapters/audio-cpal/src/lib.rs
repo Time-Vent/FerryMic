@@ -356,6 +356,14 @@ impl CpalBackend {
         Ok(resolved(device, &cfg))
     }
 
+    /// 所有输入设备的名称（轻量，不读取支持的配置）。All input device names (lightweight).
+    pub fn input_device_names(&self) -> Vec<String> {
+        self.host
+            .input_devices()
+            .map(|it| it.filter_map(|d| d.name().ok()).collect())
+            .unwrap_or_default()
+    }
+
     /// 解析输入设备（麦克风），规则同 [`Self::resolve_output`]。
     /// Resolve an input device (microphone); same rules as [`Self::resolve_output`].
     pub fn resolve_input(&self, name: Option<&str>) -> Result<ResolvedDevice, PlatformError> {

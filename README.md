@@ -1,27 +1,35 @@
 # SoundBridge
 
-桌面端「麦克风 + 音效板」小工具：把你的麦克风和音效混在一起，输出到虚拟音频线，
+桌面端「麦克风 + 音效板」小工具：把你的麦克风和音效混在一起，输出到虚拟麦克风，
 游戏语音、会议、直播软件把它当作麦克风，对方就能同时听到你的声音和音效。
 
 A small desktop "mic + soundboard" app: mixes your microphone with sound effects and
-sends the result to a virtual audio cable, so game voice chat, meetings and streaming
-apps treat it as a microphone.
+sends the result to a virtual microphone, so game voice chat, meetings and streaming
+apps hear both your voice and the effects.
 
 ## 功能
 
-- ✅ **桌面 App**：独立窗口（Tauri + 系统 WebView2），一个 9 MB 左右的 exe，无需浏览器
-- ✅ **麦克风 + 音效混合**：麦克风音量、静音、电平表
-- ✅ **麦克风随时切换**：支持手机 mic 软件、蓝牙耳机；断开自动重连；可「跟随系统默认」
-- ✅ **音效库**：拖入或选择文件导入（WAV/MP3/FLAC/OGG/AAC），自动保存，重启后还在
-- ✅ **触发方式**：点按 / 循环 / 独占 / 叠加，每个音效独立设置音量、倍速（变速变调）
+- ✅ **桌面 App**：独立窗口（Tauri + 系统 WebView），Windows 版约 9 MB，无需浏览器
+- ✅ **麦克风 + 音效混合**：自动识别硬件麦克风；音量、静音、电平表；运行中切换设备，断开自动重连
+- ✅ **发送目标可切换**：设置里选「发送给游戏」的虚拟音频线，不用重启；底部直接提示游戏里该选哪个麦克风
+- ✅ **试听**：音效同时在耳机 / 扬声器里播放，自己也能听到（不含自己的声音，可单独调音量）
+- ✅ **音效库 = 磁盘文件夹**：自选位置，子文件夹即分类（可多层）；在资源管理器里放进去的文件刷新后出现
+- ✅ **整理音效**：新建 / 重命名 / 删除文件夹，把卡片拖到文件夹即可移动；删除的文件进回收站
+- ✅ **卡片快捷控件**：循环 / 单次（双箭头图标）、独占 / 叠加（圆点 / 两个交叠的圆）、倍速都是点一下切换；音量点开竖向滑条
+- ✅ **进度条拖动**：播放中拖动卡片底部的进度条跳转
 - ✅ **全局快捷键**：按键录制设置，游戏全屏时也能触发
+- ✅ **外观**：深色 / 浅色 / 跟随系统，主题色 7 种预设 + 自定义；App 图标颜色可跟随主题色
+- ✅ **多语言**：简体中文 / English，设置里切换（默认跟随系统），界面、错误提示、托盘菜单一起切换
+- ✅ **托盘**：关闭窗口时询问「最小化到托盘」还是「退出」（可记住选择）
 - ✅ **防漏音 / 防反馈**：自动排除会形成反馈环的虚拟线和「立体声混音」这类回录设备
-- ✅ **手机遥控**（可选）：开启后手机浏览器打开同一套界面，远程触发音效
+- ✅ **Linux**：自动创建虚拟麦克风（PipeWire / PulseAudio），无需第三方软件
+- ✅ **设置内置说明**：基础操作 + 各平台接入游戏的步骤
+- ✅ **手机遥控**：左侧一键开关，扫二维码打开；带访问码，即开即关不用重启
 - ✅ **浏览器版**：`soundbridge-server` 用浏览器访问，功能与 App 相同
 
 ## 快速开始
 
-### 桌面 App（推荐）
+### Windows 桌面 App（推荐）
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build-app.ps1
@@ -29,6 +37,17 @@ powershell -ExecutionPolicy Bypass -File .\build-app.ps1
 
 产物在 `dist-app\SoundBridge\`（`SoundBridge.exe` + `WebView2Loader.dll`，两个文件放在一起），
 双击 `SoundBridge.exe` 即可运行，整个文件夹可以复制到任何位置。
+
+### Linux 桌面 App
+
+```bash
+# Debian / Ubuntu 依赖（其它发行版请装对应包）
+sudo apt install build-essential pkg-config libasound2-dev libwebkit2gtk-4.1-dev \
+     libgtk-3-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pulseaudio-utils
+./build-app.sh            # 产物：dist-app/SoundBridge/SoundBridge
+```
+
+> Linux 版目前只做了代码适配，尚未在真实 Linux 系统上实测（开发机为 Windows）。
 
 ### 浏览器版
 
@@ -42,12 +61,21 @@ cargo run --release --bin soundbridge-server
 
 ## 使用流程
 
-1. **导入音效**：把音频文件拖进窗口，或点右上角「导入音效」。文件会复制到数据目录，原文件可删。
-2. **编辑音效**：鼠标移到卡片上点「⋯」，可改名称、触发方式、音量、倍速、快捷键（点击后直接按组合键）。
-3. **播放**：点卡片或按快捷键；播放中的卡片会发光，悬停可停止。右上角「全部停止」。
-4. **麦克风**：底部麦克风条可静音、调音量、看电平；左下角「设置」里选麦克风设备。
-5. **接入游戏**：输出设为虚拟音频线（见下方环境变量），游戏/会议里把麦克风设为该线的另一端
-   （如 `CABLE Output`）。
+1. **导入音效**：把音频文件拖进窗口（或直接拖到左侧某个文件夹上），或点右上角「导入音效」。
+   文件会保存进音效库文件夹。
+2. **整理**：左侧「新建文件夹」；文件夹右侧「⋯」可新建子文件夹、重命名、删除；把卡片拖到文件夹上即可移动。
+3. **播放**：点卡片播放；播放中拖动进度条跳转，鼠标移到圆形按钮上可停止；右上角「全部停止」。
+4. **调整**：卡片底部——
+   - 双箭头图标：循环 / 单次（循环时再点一次卡片停止）；
+   - 圆点 / 两个交叠的圆：独占 / 叠加（独占会打断其它正在播放的音效）；
+   - 音量：点开竖向滑条；倍速：点一下切到下一档，右键回上一档；
+   - 「⋯」打开完整编辑（名称、文件夹、快捷键、删除）。
+5. **麦克风**：底部麦克风条可静音、调音量、看电平；默认自动选硬件麦克风，也可在设置 →「音频链路」里指定。
+6. **接入游戏**：设置 →「音频链路」→「发送给游戏」选虚拟音频线（如 `CABLE Input`），
+   底部会显示「游戏麦克风选：CABLE Output」——在游戏 / 语音软件里选它即可。
+   输出到扬声器时底部会变成黄色警告（游戏收不到）。
+7. **试听**：底部耳机按钮开关试听，音效同时在耳机里播放；设备和音量在设置里调。
+8. **手机遥控**：点左侧手机图标，开启后用手机扫二维码。
 
 **麦克风来源说明**：
 
@@ -56,62 +84,93 @@ cargo run --release --bin soundbridge-server
   程序会自动换算采样率；此时耳机放音也会变成通话音质，这是蓝牙协议本身的限制。
 - 设备中途断开时显示「等待麦克风连接…」，重新连上后自动恢复，无需重启。
 
-**会被拒绝的输入设备**（自动从列表隐藏，不限厂商）：
+**会被拒绝的输入设备**（不限厂商，按设备名判断）：
 
 - 与输出是同一个虚拟设备的两端（如 `CABLE Output` → `CABLE Input`）：会形成反馈环；
 - 立体声混音（Stereo Mix）等回录设备：会把游戏等所有正在播放的声音录进去。
 
+蓝牙耳机的麦克风与听筒同名，但不是虚拟设备，不会被误判。
+
+## 平台说明
+
+| 平台 | 虚拟麦克风 | 游戏里选择的麦克风 |
+|---|---|---|
+| Windows | 安装 VB-Cable 等虚拟音频线；设置里「发送给游戏」选 `CABLE Input` | `CABLE Output` |
+| Linux | SoundBridge 启动时**自动创建**（需 `pactl`，PipeWire / PulseAudio 均可），退出时移除 | `SoundBridge-Microphone` |
+| macOS | 安装 BlackHole；设置里「发送给游戏」选 `BlackHole 2ch` | `BlackHole 2ch` |
+
+- Windows：「声音设置」里的默认播放设备保持为耳机或扬声器，不要设成 `CABLE Input`，否则游戏声音也会进麦克风。
+- Linux：全局快捷键需要 X11 会话；Wayland 下请改用 X11 会话，或用界面 / 手机遥控触发。
+  cpal 在 Linux 走 ALSA，麦克风建议用「自动」，在系统声音设置里选择默认输入设备。
+- macOS：尚未实测；首次使用需在「隐私与安全性」中允许麦克风权限。
+
 ## 配置
+
+### 音效库
+
+音效库就是一个文件夹（默认 `<数据目录>/sounds`，可在设置里改，可选择「把现有文件一起移过去」）：
+
+- 子文件夹即分类，支持多层；以 `.` 开头的文件和文件夹会被忽略。
+- 支持 WAV / MP3 / FLAC / OGG / M4A / AAC。
+- 每个音效的设置（循环 / 独占、音量、倍速、快捷键）保存在根目录的 `.soundbridge.json`，
+  按相对路径记录，所以整个文件夹可以搬走或同步到别的电脑。
+- 在资源管理器里增删改文件后，点左侧「刷新」（或切回窗口时自动扫描）即可同步。
+  在资源管理器里改名或移动文件会丢失该音效的设置（App 内操作不会）。
+- 大文件夹不会一次性全部读进内存：后台按顺序预加载，累计约 768 MB 后其余音效在第一次播放时再加载。
 
 ### 数据目录
 
-`%APPDATA%\SoundBridge\`（可用 `SOUNDBRIDGE_DATA_DIR` 指定其它位置）：
-
-| 文件 | 内容 |
+| 平台 | 位置 |
 |---|---|
-| `library.json` | 音效库（名称、文件、触发方式、音量、倍速、快捷键） |
-| `sounds/` | 导入时复制进来的音频文件 |
-| `settings.json` | 麦克风选择与音量、手机遥控开关 |
+| Windows | `%APPDATA%\SoundBridge\` |
+| Linux | `$XDG_DATA_HOME/SoundBridge/`（默认 `~/.local/share/SoundBridge/`） |
+| macOS | `~/Library/Application Support/SoundBridge/` |
+
+`settings.json` 保存麦克风与输出设备、试听、手机遥控（开关与访问码）、外观、语言、关闭窗口行为、音效库位置。旧版的 `library.json`
+会在首次启动时自动迁移进音效库文件夹（原文件改名为 `library.v1.json.bak`）。
 
 ### 环境变量（App 与浏览器版通用）
 
 | 变量 | 作用 |
 |---|---|
-| `SOUNDBRIDGE_OUTPUT_DEVICE` | 输出设备（包含匹配），如 `CABLE Input`；不设 = 系统默认 |
+| `SOUNDBRIDGE_OUTPUT_DEVICE` | 输出设备（包含匹配），如 `CABLE Input`，优先于设置里的选择；都没有 = 系统默认（Linux 为自动创建的虚拟麦克风） |
 | `SOUNDBRIDGE_INPUT_DEVICE` | 麦克风（包含匹配），优先于上次的选择 |
 | `SOUNDBRIDGE_MIC_MUTED` | `1` = 启动时麦克风静音（输出到扬声器时防啸叫） |
 | `SOUNDBRIDGE_LAN` | `1` / `0` = 强制开 / 关手机遥控（覆盖设置） |
-| `SOUNDBRIDGE_PORT` | 端口，默认 `8321`（App 被占用时自动换端口） |
+| `SOUNDBRIDGE_PORT` | 端口，默认 `8321`（App 被占用时自动换端口）；手机遥控用「端口 + 1」 |
 | `SOUNDBRIDGE_DATA_DIR` | 数据目录 |
 
-麦克风优先级：`SOUNDBRIDGE_INPUT_DEVICE` > 上次的选择 > 系统默认。
+麦克风优先级：`SOUNDBRIDGE_INPUT_DEVICE` > 上次的选择 > 自动（系统默认的硬件麦克风，否则第一个硬件麦克风）。
+输出优先级：`SOUNDBRIDGE_OUTPUT_DEVICE` > 上次的选择 > 系统默认。
 
 ### 手机遥控
 
-默认**关闭**，只允许本机访问。在设置里打开后**重启生效**，设置页会显示手机访问地址
-（手机与电脑需在同一 Wi-Fi；首次开启时 Windows 可能询问防火墙权限）。
-目前没有访问密码，同一局域网内的设备都能打开界面，请只在可信网络开启。
+默认**关闭**。点左侧手机图标即可开启，**立即生效**，面板里显示二维码和网址
+（手机与电脑需在同一 Wi-Fi；首次开启时系统可能询问防火墙权限）。
+
+- 手机遥控在单独的端口（主端口 + 1）上监听局域网，关闭时这个端口直接停掉；本机界面始终只监听 `127.0.0.1`。
+- 网址带访问码 `?t=…`，扫码后记在手机的 Cookie 里；没有访问码的设备打不开。
+  「重新生成访问码」后，已扫过码的手机需要重新扫。
+- 手机上不能修改设备、设置、音效库位置等电脑端选项，只能播放 / 停止 / 编辑音效。
 
 ## 架构
 
 ```
 apps/app（桌面 App，Tauri）              apps/server（浏览器版入口）
+   ├─ 托盘 / 关闭询问 / 图标着色            │
    └─ 原生窗口 ──加载──┐                    │
                        ▼                    ▼
               soundbridge_server（库）：HTTP API + 内嵌前端 apps/web
-                ├─ 音效库（library.rs）：持久化 + 导入
-                ├─ 音效板（soundboard crate）：触发语义 + 混音
-                ├─ 麦克风线程（mic.rs）：采集 + 切换 + 断开重连 + 输入检查
+                ├─ 音效库（library.rs）：磁盘文件夹 + .soundbridge.json
+                ├─ 加载线程（loader.rs）：预加载 + 按需加载，唯一触发入口
+                ├─ 音效板（soundboard crate）：触发语义 + 混音 + 定位
+                ├─ 输出线程（audio.rs）：混音回调 + 运行中切换输出设备
+                ├─ 麦克风线程（mic.rs）：采集 + 自动选硬件麦克风 + 断开重连 + 输入检查
+                ├─ 试听线程（monitor.rs）：只含音效的混音 → 耳机 / 扬声器（重采样）
+                ├─ 手机遥控（remote.rs）：局域网监听（端口 + 1）+ 访问码 + 二维码
                 ├─ 全局热键线程（hotkeys.rs）：Win32 消息循环
+                ├─ Linux 虚拟麦克风（virtual_mic.rs）：pactl 建 null sink + remap source
                 └─ 音频输出（audio-cpal）：声卡 / 虚拟音频线
-```
-
-```
-麦克风（手机 mic / 蓝牙耳机 / USB）────────────┐
-                                              ▼
-App 窗口 / 浏览器 / 手机 ──HTTP──▶ 音效板 ──混音──▶ 虚拟音频线 ──▶ 游戏 / 会议
-                                    ▲
-全局热键（游戏里按快捷键）─────────────┘
 ```
 
 详见 [音效板架构](docs/soundboard-architecture.md)。
@@ -121,34 +180,46 @@ App 窗口 / 浏览器 / 手机 ──HTTP──▶ 音效板 ──混音──
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/health` | 健康检查 |
-| GET | `/api/app` | 版本、数据目录、输出设备、端口、手机遥控状态 |
-| POST | `/api/settings` | 修改设置 `{lan_remote?}` |
-| GET | `/api/live` | 实时状态：正在播放的音效、麦克风电平 |
-| GET | `/api/devices` | 输入/输出设备列表（输入已排除反馈环与回录设备） |
-| GET | `/api/mic` | 麦克风状态（选择、在用设备、是否连接、音量、静音、电平） |
-| POST | `/api/mic` | 设麦克风 `{gain_db?, muted?}`（音量会被记住） |
-| POST | `/api/mic/device` | 切换麦克风 `{device: "名称" \| null}`，`null` = 跟随系统默认 |
-| GET | `/api/sounds` | 列出音效（含时长、加载错误） |
-| POST | `/api/sounds/import` | 上传导入（multipart：`file`，可选 `name`） |
-| POST | `/api/sounds` | 按本机路径添加（文件留在原处） |
-| PATCH | `/api/sounds/:id` | 编辑 `{name?, trigger_mode?, gain_db?, speed?, hotkey?}`，`hotkey: null` 清除 |
-| DELETE | `/api/sounds/:id` | 删除（导入的文件一并删除） |
+| GET | `/api/app` | 版本、平台、数据目录、音效库位置、输出设备、外观、手机遥控、窗口选项、虚拟麦克风状态 |
+| POST | `/api/settings` | 修改设置 `{theme_mode?, accent?, auto_virtual_mic?, tint_app_icon?, close_action?, language?}`（`language`：`system` / `zh-CN` / `en`） |
+| POST | `/api/window` | 回答关闭询问 `{action: "tray" \| "quit" \| "cancel", remember}`（桌面 App） |
+| POST | `/api/pick-folder` | 在电脑上弹出「选择文件夹」对话框，返回 `{path}` |
+| GET | `/api/live` | 实时状态：`{playing: [{id, progress}], mic_level, mic_connected, close_prompt}` |
+| GET | `/api/devices` | 设备列表：输出带 `kind`（virtual / speaker）与 `game_mic`，输入带 `virtual` |
+| POST | `/api/output` | 运行中切换「发送给游戏」的输出 `{device: "名称" \| null}`，失败恢复原设备 |
+| GET / POST | `/api/monitor` | 试听状态 / 设置 `{enabled?, device?, gain_db?}` |
+| GET / POST | `/api/remote` | 手机遥控状态 / 开关 `{enabled?, regenerate?}`，即时生效 |
+| GET | `/api/remote/qr.svg` | 手机遥控网址的二维码 |
+| GET / POST | `/api/mic` | 麦克风状态 / 设置 `{gain_db?, muted?}` |
+| POST | `/api/mic/device` | 切换麦克风 `{device: "名称" \| null}`，`null` = 自动（优先硬件麦克风） |
+| GET | `/api/library` | 音效库：`{root, folders, sounds}` |
+| POST | `/api/library/rescan` | 重新扫描磁盘 |
+| POST | `/api/library/location` | 修改音效库位置 `{path, move_contents}` |
+| POST | `/api/library/open` | 在系统文件管理器中打开音效库 |
+| POST / PATCH / DELETE | `/api/folders` | 新建 `{path}` / 重命名或移动 `{from, to}` / 删除空文件夹 `{path}` |
+| GET | `/api/sounds` | 列出音效 |
+| POST | `/api/sounds/import` | 上传导入（multipart：`file`，可选 `folder`） |
+| PATCH | `/api/sounds/:id` | 编辑 `{name?, folder?, looping?, exclusive?, gain_db?, speed?, hotkey?}`；`name` 改文件名，`folder` 移动文件，`hotkey: null` 清除 |
+| DELETE | `/api/sounds/:id` | 删除（文件移到回收站） |
 | POST | `/api/sounds/:id/trigger` · `/stop` | 触发 / 停止 |
+| POST | `/api/sounds/:id/seek` | 跳转 `{position: 0..1}` |
 | POST | `/api/stop-all` | 停止全部 |
 
 ## 环境要求（开发）
 
-- **Rust stable** + **MinGW-w64**（`winget install BrechtSanders.WinLibs.POSIX.UCRT`）
+- **Rust stable**；Windows 用 **MinGW-w64**（`winget install BrechtSanders.WinLibs.POSIX.UCRT`）
 - **Node.js LTS + pnpm**（构建前端；`winget install OpenJS.NodeJS.LTS`，`npm install -g pnpm`）
-- Windows 10/11 + WebView2 运行时（Win11 自带）
-- 虚拟音频线（如 VB-Cable）：让游戏把输出当麦克风
+- Windows 10/11 + WebView2 运行时（Win11 自带）；Linux 需 WebKitGTK 4.1、ALSA 开发包、`pactl`
+- 虚拟音频线（Windows / macOS）：让游戏把输出当麦克风
 
 > 若源码路径含非 ASCII 字符（如中文目录），GNU 工具链的 `dlltool` 可能失败。
 > 建议 `CARGO_TARGET_DIR` 指向纯 ASCII 路径。
 
-**已知问题**：用 GNU 工具链编译 App 时链接器会提示
-`.rsrc merge failure: multiple non-default manifests`（Tauri 与 Rust 标准库各带一份程序清单，
-GNU ld 无法合并），目前未发现功能影响。
+**已知问题**：
+
+- 用 GNU 工具链编译 Windows App 时链接器会提示 `.rsrc merge failure: multiple non-default manifests`
+  （Tauri 与 Rust 标准库各带一份程序清单，GNU ld 无法合并），目前未发现功能影响。
+- 关闭询问、托盘、图标着色只在桌面 App 里有；浏览器版没有这些选项。
 
 ## 目录结构
 
@@ -159,18 +230,19 @@ soundbridge/
 │   ├── platform-api/    # 能力 trait 契约
 │   ├── dsp/             # 定长处理器
 │   ├── audio-graph/     # 顺序处理链
-│   ├── audio-source/    # 解码 + 变速源
+│   ├── audio-source/    # 解码 + 变速源（共享 PCM、定位）
 │   ├── audio-engine/    # 三执行器 + DriftController
-│   ├── soundboard/      # 音效板核心（多音效 + 触发语义）
+│   ├── soundboard/      # 音效板核心（多音效 + 触发语义 + 定位）
 │   └── application/     # CLI 演示用装配层
 ├── adapters/
 │   └── audio-cpal/      # cpal 实现 AudioBackend
 ├── apps/
 │   ├── app/             # 桌面 App（Tauri 外壳）
-│   ├── server/          # 服务库 + 浏览器版入口（音频 + 热键 + API）
+│   ├── server/          # 服务库 + 浏览器版入口（音频 + 热键 + 音效库 + API）
 │   ├── web/             # 界面（Vite + TS，App / 浏览器 / 手机共用）
 │   └── desktop/         # CLI 演示壳
-├── build-app.ps1        # 一键构建桌面 App
+├── build-app.ps1        # Windows 一键构建
+├── build-app.sh         # Linux 一键构建
 ├── docs/                # 架构 + 代码走读 + ADR
 └── tests/fixtures/audio/
 ```

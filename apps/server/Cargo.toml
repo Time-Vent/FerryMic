@@ -28,8 +28,15 @@ tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 global-hotkey = "0.6"
+# 删除音效时移到回收站。Deleted sounds go to the recycle bin.
+trash = "5"
+# 选择音效库文件夹的系统对话框。Native dialog for picking the library folder.
+rfd = "0.15"
+# 手机遥控二维码。QR code for the phone remote.
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # 把前端 dist 嵌入可执行文件（App 不依赖工作目录）。Embed the front-end dist into the binary.
 rust-embed = { version = "8", features = ["mime-guess"] }
+sys-locale = "0.3"
 
 # Windows：全局热键线程需要 Win32 消息循环。Windows: the hotkey thread needs a Win32 message loop.
 [target.'cfg(windows)'.dependencies]

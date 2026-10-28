@@ -38,8 +38,42 @@ pub const MAX_INSTANCES: usize = 32;
 /// Reserved definition capacity, so `AddSound` doesn't grow the hash map.
 const RESERVED_SOUNDS: usize = 256;
 
-/// 触发模式（用户可 DIY）。
-/// Trigger mode (user-configurable).
+/// 播放方式：两个独立的开关。Play mode: two independent switches.
+///
+/// | looping | exclusive | 按一下 Press |
+/// |---|---|---|
+/// | 否 | 否 | 从头播一遍，可与其它音效（包括自己）叠加 / plays once, layers over others (and itself) |
+/// | 否 | 是 | 停掉所有正在播的，再从头播 / stops everything, then plays from the start |
+/// | 是 | 否 | 开始循环；正在播时再按一下停止 / starts looping; press again to stop |
+/// | 是 | 是 | 停掉其它后开始循环；再按一下停止 / stops others, loops; press again to stop |
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlayMode {
+    /// 循环播放（否 = 单次）。Loop (false = play once).
+    pub looping: bool,
+    /// 独占：播放时打断其它所有音效（否 = 叠加）。Exclusive: interrupts everything
+    /// else (false = overlap).
+    pub exclusive: bool,
+}
+
+impl From<TriggerMode> for PlayMode {
+    fn from(m: TriggerMode) -> Self {
+        match m {
+            TriggerMode::OneShot | TriggerMode::Overlap => Self::default(),
+            TriggerMode::Loop => Self {
+                looping: true,
+                exclusive: false,
+            },
+            TriggerMode::Exclusive => Self {
+                looping: false,
+                exclusive: true,
+            },
+        }
+    }
+}
+
+/// 旧版的四种触发模式，只用于读取旧数据（见 [`PlayMode`] 的换算）。
+/// The old four trigger modes, only for reading old data (converted to [`PlayMode`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TriggerMode {
     /// 点按：每按一次从头播放一遍，播完自动停止。
@@ -65,8 +99,8 @@ pub struct SoundSpec {
     pub name: String,
     /// 音频文件路径。Audio file path.
     pub file_path: std::path::PathBuf,
-    /// 触发模式。Trigger mode.
-    pub trigger_mode: TriggerMode,
+    /// 播放方式（循环 / 独占）。Play mode (loop / exclusive).
+    pub mode: PlayMode,
     /// 增益（dB）。Gain in dB.
     pub gain_db: f32,
     /// 播放倍速（varispeed，变速变调）。Playback speed (varispeed).
@@ -79,12 +113,28 @@ pub struct SoundSpec {
 /// 已解码的音效：定义 + 共享 PCM。在控制侧构造，再交给实时侧。
 /// A decoded sound: definition + shared PCM. Built on the control side, then handed
 /// to the real-time side.
+///
+/// `clone` 只复制定义、共享 PCM（引用计数），控制侧可以留一份缓存：重建输出流时重新装入，
+/// 且音频线程移除音效时不会成为最后一个持有者（大块内存不在实时线程释放）。
+/// `clone` copies the definition and shares the PCM (refcount), so the control side
+/// can keep a cache: re-installed when the output stream is rebuilt, and the audio
+/// thread is never the last owner when a sound is removed (no big frees there).
+#[derive(Clone)]
 pub struct LoadedSound {
     pub spec: SoundSpec,
     source: VarispeedSource,
 }
 
 impl LoadedSound {
+    /// 换一份定义（如最新的音量设置），共享同一份 PCM。
+    /// Swap in another definition (e.g. the latest volume), sharing the same PCM.
+    pub fn with_spec(&self, spec: SoundSpec) -> Self {
+        Self {
+            spec,
+            source: self.source.clone(),
+        }
+    }
+
     /// 解码 `spec.file_path`（WAV/MP3/FLAC/OGG/AAC 等）。会做文件 IO 与解码，
     /// **不要在实时线程调用**。
     /// Decode `spec.file_path` (WAV/MP3/FLAC/OGG/AAC etc.). Does file IO and
@@ -102,6 +152,11 @@ impl LoadedSound {
     /// 源文件时长（秒）。Source file duration in seconds.
     pub fn duration_secs(&self) -> f32 {
         self.source.total_frames() as f32 / self.source.sample_rate().max(1) as f32
+    }
+
+    /// 解码后占用的内存（字节，f32 PCM）。Memory used by the decoded PCM (bytes, f32).
+    pub fn decoded_bytes(&self) -> usize {
+        self.source.total_frames() * self.source.channels() * std::mem::size_of::<f32>()
     }
 }
 
@@ -135,12 +190,13 @@ pub enum BoardCommand {
     SetGain { sound_id: SoundId, gain_db: f32 },
     /// 设置某音效变速。Set a sound's speed.
     SetSpeed { sound_id: SoundId, speed: f32 },
-    /// 设置某音效的触发模式（会停止它正在播放的实例）。
-    /// Set a sound's trigger mode (stops its playing instances).
-    SetMode {
-        sound_id: SoundId,
-        mode: TriggerMode,
-    },
+    /// 设置某音效的播放方式。正在播放的实例随之改为循环 / 单次（单次的播完自然停止）。
+    /// Set a sound's play mode. Playing instances switch to loop / once accordingly
+    /// (once = they end naturally).
+    SetMode { sound_id: SoundId, mode: PlayMode },
+    /// 把某音效正在播放的实例跳到进度 `position`（0..1，拖动进度条）。
+    /// Seek a sound's playing instances to `position` (0..1, progress-bar drag).
+    Seek { sound_id: SoundId, position: f32 },
 }
 
 /// 正在播放的音效实例。
@@ -235,51 +291,47 @@ impl SoundBoard {
             }
             BoardCommand::SetMode { sound_id, mode } => {
                 if let Some(s) = self.sounds.get_mut(&sound_id) {
-                    s.spec.trigger_mode = mode;
+                    s.spec.mode = mode;
                 }
-                // 旧实例按旧模式播放（如循环），直接停掉避免语义混乱。
-                // Old instances follow the old mode (e.g. looping); stop them.
-                self.instances.retain(|i| i.sound_id != sound_id);
+                for i in &mut self.instances {
+                    if i.sound_id == sound_id {
+                        i.loop_ = mode.looping;
+                    }
+                }
+            }
+            BoardCommand::Seek { sound_id, position } => {
+                for i in &mut self.instances {
+                    if i.sound_id == sound_id {
+                        i.source.seek_ratio(position);
+                    }
+                }
             }
         }
     }
 
-    /// 触发一个音效：根据其触发模式启动/停止实例。
-    /// Trigger a sound: start/stop instances per its trigger mode.
+    /// 触发一个音效：按播放方式启动 / 停止实例（见 [`PlayMode`]）。
+    /// Trigger a sound: start / stop instances per its play mode (see [`PlayMode`]).
     fn trigger(&mut self, sound_id: SoundId) {
         let Some(sound) = self.sounds.get(&sound_id) else {
             return; // 未定义的音效。Unknown sound.
         };
-        let mode = sound.spec.trigger_mode;
+        let mode = sound.spec.mode;
 
-        match mode {
-            TriggerMode::OneShot | TriggerMode::Overlap => {
-                // 点按 / 叠加：新建实例从头播，不停止其它。
-                // One-shot / overlap: new instance from start, don't stop others.
-            }
-            TriggerMode::Loop => {
-                // 循环：已有循环实例则停止，否则新建循环实例。
-                // Loop: stop if already looping, else create a loop instance.
-                let already = self
-                    .instances
-                    .iter()
-                    .any(|i| i.sound_id == sound_id && i.loop_);
-                if already {
-                    self.instances.retain(|i| i.sound_id != sound_id);
-                    return;
-                }
-            }
-            TriggerMode::Exclusive => {
-                // 独占：停止所有其它实例。Exclusive: stop all others.
-                self.instances.clear();
-            }
+        // 循环：正在播时再按一下就停止。Looping: pressing while playing stops it.
+        if mode.looping && self.instances.iter().any(|i| i.sound_id == sound_id) {
+            self.instances.retain(|i| i.sound_id != sound_id);
+            return;
+        }
+        // 独占：先停掉所有正在播的（包括自己）。Exclusive: stop everything first.
+        if mode.exclusive {
+            self.instances.clear();
         }
 
         let inst = Instance {
             sound_id,
             // 只克隆 Arc，不复制 PCM、不分配。Arc clone only — no copy, no alloc.
             source: sound.source.clone(),
-            loop_: mode == TriggerMode::Loop,
+            loop_: mode.looping,
             gain_lin: db_to_linear(sound.spec.gain_db),
             speed: clamp_speed(sound.spec.speed),
             rate_ratio: sound.source.sample_rate().max(1) as f32 / self.output_rate as f32,
@@ -303,12 +355,14 @@ impl SoundBoard {
         self.sounds.len()
     }
 
-    /// 依次回调每个播放实例的音效 id（同一音效可能出现多次）。不分配，可在实时线程调用。
-    /// Call `f` with the sound id of every playing instance (a sound may appear more
-    /// than once). Allocation-free; safe on the real-time thread.
-    pub fn for_each_playing(&self, mut f: impl FnMut(SoundId)) {
+    /// 依次回调每个播放实例的（音效 id, 进度 0..1），按启动先后排列（同一音效可能出现
+    /// 多次，最后一个是最新的）。不分配，可在实时线程调用。
+    /// Call `f` with (sound id, progress 0..1) for every playing instance, in start
+    /// order (a sound may appear more than once; the last is the newest).
+    /// Allocation-free; safe on the real-time thread.
+    pub fn for_each_playing(&self, mut f: impl FnMut(SoundId, f32)) {
         for i in &self.instances {
-            f(i.sound_id);
+            f(i.sound_id, i.source.progress());
         }
     }
 
@@ -462,7 +516,7 @@ mod tests {
             id,
             name: format!("s{id}"),
             file_path: path,
-            trigger_mode: mode,
+            mode: mode.into(),
             gain_db: 0.0,
             speed: 1.0,
             hotkey: None,
@@ -584,11 +638,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 改触发模式会停止旧实例，之后按新模式播放；for_each_playing 反映当前实例。
-    /// Changing the mode stops old instances, then plays with the new mode;
-    /// for_each_playing reflects current instances.
+    /// 循环开关：再按一下停止；改为单次后正在播的实例不再循环；叠加 / 独占的区别。
+    /// The loop switch: pressing again stops; switching to once stops looping in
+    /// place; overlap vs exclusive.
     #[test]
-    fn set_mode_stops_instances_and_applies_new_mode() {
+    fn play_mode_switches() {
         let dir = temp_dir("soundboard-test-mode");
         let wav = make_test_wav(&dir, "s.wav", 48_000, 4800);
 
@@ -596,20 +650,54 @@ mod tests {
         add(&mut board, 7, &wav, TriggerMode::Loop);
         board.apply_command(BoardCommand::Trigger { sound_id: 7 });
         let mut ids = Vec::new();
-        board.for_each_playing(|id| ids.push(id));
+        board.for_each_playing(|id, _| ids.push(id));
         assert_eq!(ids, vec![7]);
 
-        board.apply_command(BoardCommand::SetMode {
+        // 拖动进度：跳到一半后，进度应约为 0.5。Seek to half: progress ≈ 0.5.
+        board.apply_command(BoardCommand::Seek {
             sound_id: 7,
-            mode: TriggerMode::Overlap,
+            position: 0.5,
         });
+        let mut progress = 0.0;
+        board.for_each_playing(|_, p| progress = p);
+        assert!((progress - 0.5).abs() < 1e-3, "progress={progress}");
+
+        // 循环中再按一下：停止。Press again while looping: stops.
+        board.apply_command(BoardCommand::Trigger { sound_id: 7 });
         assert_eq!(board.instance_count(), 0);
 
-        // 叠加模式：连按两次有两个实例（循环模式下第二次会停止）。
-        // Overlap: two presses give two instances (Loop would stop on the second).
+        // 单次 + 叠加：连按两次有两个实例。Once + overlap: two presses, two instances.
+        board.apply_command(BoardCommand::SetMode {
+            sound_id: 7,
+            mode: PlayMode::default(),
+        });
         board.apply_command(BoardCommand::Trigger { sound_id: 7 });
         board.apply_command(BoardCommand::Trigger { sound_id: 7 });
         assert_eq!(board.instance_count(), 2);
+
+        // 单次 + 独占：再按一下只剩一个（从头播）。Once + exclusive: one instance, restarted.
+        board.apply_command(BoardCommand::SetMode {
+            sound_id: 7,
+            mode: PlayMode {
+                looping: false,
+                exclusive: true,
+            },
+        });
+        board.apply_command(BoardCommand::Trigger { sound_id: 7 });
+        assert_eq!(board.instance_count(), 1);
+
+        // 正在播放时切到循环：实例原地改为循环，播完也不结束。
+        // Switching to loop while playing: the instance loops in place and doesn't end.
+        board.apply_command(BoardCommand::SetMode {
+            sound_id: 7,
+            mode: PlayMode {
+                looping: true,
+                exclusive: true,
+            },
+        });
+        let mut out = vec![0.0f32; 9600];
+        board.fill(&mut out, 9600, 1);
+        assert_eq!(board.instance_count(), 1);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

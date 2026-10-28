@@ -14,33 +14,91 @@
 //! Phone remote: when enabled in settings it listens on `0.0.0.0` and a phone browser
 //! opens `http://<PC-IP>:<port>`; by default it listens on localhost only.
 
+#[macro_use]
+pub mod i18n;
 mod api;
 mod audio;
 mod hotkeys;
 mod library;
+mod loader;
 mod mic;
+mod monitor;
+mod remote;
 mod settings;
+mod virtual_mic;
 
 use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use crossbeam_channel::unbounded;
-use soundboard::{BoardCommand, LoadedSound};
+use soundboard::BoardCommand;
 
 use api::AppState;
-use library::{Library, SoundRuntime};
+use library::Library;
+use loader::Player;
 use mic::MicControl;
 use settings::SettingsStore;
+use virtual_mic::{VirtualMic, VirtualMicInfo};
 
-pub use settings::data_dir;
+pub use settings::{data_dir, CloseAction, Settings};
 
 /// 默认端口。Default port.
 pub const DEFAULT_PORT: u16 = 8321;
 
+/// 窗口操作（界面里的关闭询问选好后交给桌面外壳执行）。
+/// A window action (chosen in the UI's close prompt, carried out by the desktop shell).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowAction {
+    /// 最小化到托盘。Minimize to the tray.
+    Tray,
+    /// 退出程序。Quit.
+    Quit,
+}
+
+/// 设置改变后的回调。Callback after settings change.
+pub type SettingsHook = Arc<dyn Fn(&Settings) + Send + Sync>;
+/// 关闭询问选好后的回调。Callback once the close prompt is answered.
+pub type WindowHook = Arc<dyn Fn(WindowAction) + Send + Sync>;
+
+/// 桌面外壳的回调（浏览器版没有）。Callbacks for the desktop shell (absent in the
+/// browser version).
+#[derive(Clone, Default)]
+pub struct Hooks {
+    /// 设置改变后调用（外壳据此更新图标颜色等）。Called after settings change (e.g. to
+    /// re-tint the icon).
+    pub on_settings: Option<SettingsHook>,
+    /// 关闭询问选好后调用。Called once the close prompt is answered.
+    pub on_window_action: Option<WindowHook>,
+}
+
+/// 外壳持有的控制句柄。A control handle held by the shell.
+#[derive(Clone)]
+pub struct Control {
+    close_prompt: Arc<AtomicBool>,
+    settings: Arc<SettingsStore>,
+}
+
+impl Control {
+    /// 用户点了窗口关闭按钮：请界面弹出询问。返回 `true` 表示询问已在显示中
+    /// （再点一次 = 直接退出，防止界面无响应时关不掉）。
+    /// The user clicked the window's close button: ask the UI to prompt. Returns `true`
+    /// if a prompt is already showing (a second click = quit, so an unresponsive UI
+    /// can't trap the user).
+    pub fn request_close(&self) -> bool {
+        self.close_prompt.swap(true, Ordering::Relaxed)
+    }
+
+    /// 当前设置快照。A snapshot of the current settings.
+    pub fn settings(&self) -> Settings {
+        self.settings.get()
+    }
+}
+
 /// 服务启动参数。Service start-up options.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ServerConfig {
     /// 监听端口。Port to listen on.
     pub port: u16,
@@ -55,6 +113,8 @@ pub struct ServerConfig {
     pub mic_muted: bool,
     /// 强制开/关局域网遥控（覆盖设置）。Force LAN remote on/off (overrides settings).
     pub lan_override: Option<bool>,
+    /// 桌面外壳回调。Desktop-shell callbacks.
+    pub hooks: Hooks,
 }
 
 impl Default for ServerConfig {
@@ -66,6 +126,7 @@ impl Default for ServerConfig {
             input_device: None,
             mic_muted: false,
             lan_override: None,
+            hooks: Hooks::default(),
         }
     }
 }
@@ -88,17 +149,20 @@ impl ServerConfig {
             input_device: std::env::var("SOUNDBRIDGE_INPUT_DEVICE").ok(),
             mic_muted: flag("SOUNDBRIDGE_MIC_MUTED").unwrap_or(false),
             lan_override: flag("SOUNDBRIDGE_LAN"),
+            hooks: Hooks::default(),
         }
     }
 }
 
 /// 服务已就绪的信息。Info once the service is ready.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ServerInfo {
     /// 实际端口。Actual port.
     pub port: u16,
     /// 本机访问地址。Local URL.
     pub local_url: String,
+    /// 外壳用的控制句柄。Control handle for the shell.
+    pub control: Control,
 }
 
 /// 启动并运行服务，直到出错。`on_ready` 在开始监听后调用一次。
@@ -111,71 +175,90 @@ pub async fn run(config: ServerConfig, on_ready: impl FnOnce(ServerInfo)) -> any
     let data_dir = settings::data_dir();
     let settings = Arc::new(SettingsStore::load_default());
     let saved = settings.get();
-    let library = Arc::new(Library::load(&data_dir));
+    i18n::apply(&saved.language);
 
-    // 命令通道：Web API / 热键 → 音频线程。Command channel: web API / hotkeys → audio.
-    let (cmd_tx, cmd_rx) = unbounded::<BoardCommand>();
+    // 输出设备：参数（环境变量）优先，否则上次的选择，都没有则系统默认。
+    // Output device: explicit option (env) first, else the last choice, else default.
+    let output_device = config.output_device.clone().or(saved.output_device.clone());
 
-    // 初始麦克风：参数优先，否则上次的选择，都没有则跟随系统默认。
-    // Initial mic: explicit option first, else the last choice, else system default.
-    let initial_mic = config.input_device.clone().or(saved.mic_device.clone());
-    let mic = Arc::new(MicControl::new(config.mic_muted, saved.mic_gain_db));
-    let audio_rt = audio::start_audio(
-        cmd_rx,
-        config.output_device.as_deref(),
-        initial_mic,
-        mic.clone(),
-        settings.clone(),
-    )?;
-
-    let (hotkey_tx, hotkey_rx) = unbounded::<hotkeys::HotkeyCommand>();
-    hotkeys::spawn_hotkey_thread(hotkey_rx, cmd_tx.clone());
-
-    // 加载音效库：逐个解码并交给音频线程，绑定快捷键。文件丢失的保留在列表里并标出错误。
-    // Load the library: decode each sound, hand it to audio, bind hotkeys. Sounds whose
-    // files are missing stay listed with an error.
-    for spec in library.list() {
-        let id = spec.id;
-        let hotkey = spec.hotkey.clone();
-        match LoadedSound::load(spec) {
-            Ok(loaded) => {
-                library.set_runtime(
-                    id,
-                    SoundRuntime {
-                        duration_secs: Some(loaded.duration_secs()),
-                        error: None,
-                    },
-                );
-                let _ = cmd_tx.send(BoardCommand::AddSound(Box::new(loaded)));
-                if hotkey.is_some() {
-                    let _ = hotkey_tx.send(hotkeys::HotkeyCommand::Bind {
-                        sound_id: id,
-                        hotkey,
-                        reply: None,
-                    });
+    // Linux：未指定输出设备时自动创建虚拟麦克风（必须在打开音频流之前）。
+    // Linux: create the virtual mic when no output device is given (before any stream).
+    let (virtual_mic, virtual_mic_info) =
+        if cfg!(target_os = "linux") && output_device.is_none() && saved.auto_virtual_mic {
+            match VirtualMic::setup() {
+                Ok(v) => (
+                    Some(v),
+                    Some(VirtualMicInfo {
+                        active: true,
+                        source: virtual_mic::SOURCE_DESCRIPTION.into(),
+                        note: None,
+                    }),
+                ),
+                Err(e) => {
+                    log::warn!("虚拟麦克风创建失败 virtual mic setup failed: {e}");
+                    (
+                        None,
+                        Some(VirtualMicInfo {
+                            active: false,
+                            source: virtual_mic::SOURCE_DESCRIPTION.into(),
+                            note: Some(e),
+                        }),
+                    )
                 }
             }
-            Err(e) => {
-                log::warn!("音效 #{id} 加载失败 failed to load sound: {e}");
-                library.set_runtime(
-                    id,
-                    SoundRuntime {
-                        duration_secs: None,
-                        error: Some(format!("无法加载音频文件：{e}")),
-                    },
-                );
-            }
+        } else {
+            (None, None)
+        };
+
+    // 音效库：先迁移旧版数据，再打开根目录。Library: migrate old data, then open the root.
+    let root = saved.library_root();
+    library::migrate_v1(&data_dir, &root);
+    let library = Arc::new(Library::open(root));
+
+    // 命令通道：加载线程 / Web API / 热键 → 音频线程。
+    // Command channel: loader / web API / hotkeys → audio.
+    let (cmd_tx, cmd_rx) = unbounded::<BoardCommand>();
+
+    // 加载线程（切换输出设备时要靠它重新装入音效，所以先于音频创建）。
+    // Loader thread (created before audio: output switches rely on it to re-install sounds).
+    let player = Player::new(cmd_tx, library.clone());
+
+    // 初始麦克风：参数优先，否则上次的选择，都没有则自动选择硬件麦克风。
+    // Initial mic: explicit option first, else the last choice, else auto (hardware mic).
+    let initial_mic = config.input_device.clone().or(saved.mic_device.clone());
+    let mic = Arc::new(MicControl::new(config.mic_muted, saved.mic_gain_db));
+    let monitor = Arc::new(monitor::MonitorControl::new(saved.monitor_gain_db));
+    let audio_rt = audio::start_audio(
+        cmd_rx,
+        output_device,
+        initial_mic,
+        mic.clone(),
+        monitor.clone(),
+        settings.clone(),
+        player.clone(),
+    )?;
+
+    // 热键线程。Hotkey thread.
+    let (hotkey_tx, hotkey_rx) = unbounded::<hotkeys::HotkeyCommand>();
+    hotkeys::spawn_hotkey_thread(hotkey_rx, player.clone());
+
+    // 绑定快捷键并排队预加载（后台进行，不阻塞启动）。
+    // Bind hotkeys and queue preloads (in the background; start-up isn't blocked).
+    for e in library.entries() {
+        if e.meta.hotkey.is_some() {
+            let _ = hotkey_tx.send(hotkeys::HotkeyCommand::Bind {
+                sound_id: e.meta.id,
+                hotkey: e.meta.hotkey.clone(),
+                reply: None,
+            });
         }
+        player.preload(e.meta.id);
     }
 
-    // 监听地址：开启手机遥控时为 0.0.0.0，否则只监听本机。
-    // Listen address: 0.0.0.0 with phone remote on, otherwise localhost only.
-    let lan = config.lan_override.unwrap_or(saved.lan_remote);
-    let ip: IpAddr = if lan {
-        [0, 0, 0, 0].into()
-    } else {
-        [127, 0, 0, 1].into()
-    };
+    // 主服务只监听本机；手机遥控由单独的局域网监听负责（可随时开关）。
+    // The main service listens on localhost only; the phone remote has its own LAN
+    // listener (switchable at any time).
+    let ip: IpAddr = [127, 0, 0, 1].into();
     let listener = match tokio::net::TcpListener::bind(SocketAddr::new(ip, config.port)).await {
         Ok(l) => l,
         Err(e) if config.port_fallback => {
@@ -186,31 +269,61 @@ pub async fn run(config: ServerConfig, on_ready: impl FnOnce(ServerInfo)) -> any
     };
     let port = listener.local_addr()?.port();
 
+    // 手机遥控：访问码保存在设置里（首次生成），端口默认为主端口 + 1。
+    // Phone remote: the access code lives in settings (generated once); port = main + 1.
+    let token = saved.remote_token.clone().unwrap_or_else(|| {
+        let t = remote::new_token();
+        settings.update(|s| s.remote_token = Some(t.clone()));
+        t
+    });
+    let remote = Arc::new(remote::RemoteServer::new(token, port.saturating_add(1)));
+    let close_prompt = Arc::new(AtomicBool::new(false));
+
+    let state_settings = settings.clone();
     let state = AppState {
-        cmd_tx,
+        player,
         hotkey_tx,
         library,
         mic,
         mic_tx: audio_rt.mic_tx.clone(),
-        audio_info: Arc::new(audio_rt.info.clone()),
+        out_tx: audio_rt.out_tx.clone(),
+        monitor,
+        monitor_tx: audio_rt.monitor_tx.clone(),
+        audio_info: audio_rt.info.clone(),
         playing: audio_rt.playing.clone(),
         settings,
         data_dir,
         port,
-        lan_active: lan,
+        remote: remote.clone(),
+        virtual_mic: virtual_mic_info,
+        hooks: config.hooks.clone(),
+        close_prompt: close_prompt.clone(),
     };
     let app = api::router(state).fallback(static_handler);
+    remote.set_router(app.clone());
+    if config.lan_override.unwrap_or(saved.lan_remote) {
+        if let Err(e) = remote.start().await {
+            log::warn!("手机遥控开启失败 phone remote failed: {e}");
+            remote.set_error(Some(e));
+        }
+    }
 
     let local_url = format!("http://127.0.0.1:{port}");
     log::info!("SoundBridge 已启动 listening on {local_url}");
-    if lan {
-        log::info!("手机遥控已开启 phone remote: http://<电脑IP>:{port}");
-    }
-    on_ready(ServerInfo { port, local_url });
+    on_ready(ServerInfo {
+        port,
+        local_url,
+        control: Control {
+            close_prompt,
+            settings: state_settings,
+        },
+    });
 
     axum::serve(listener, app).await?;
-    // 音频运行时活到服务结束。Keep the audio runtime alive until the server ends.
+    // 音频运行时与虚拟麦克风活到服务结束（虚拟麦克风 drop 时卸载）。
+    // Keep the audio runtime and virtual mic alive until the end (the mic unloads on drop).
     drop(audio_rt);
+    drop(virtual_mic);
     Ok(())
 }
 

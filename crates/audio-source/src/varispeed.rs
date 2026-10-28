@@ -78,6 +78,26 @@ impl VarispeedSource {
         self.phase
     }
 
+    /// 播放进度 0..1（按源帧计）。Playback progress 0..1 (in source frames).
+    pub fn progress(&self) -> f32 {
+        let total = self.total_frames();
+        if total == 0 {
+            return 1.0;
+        }
+        (self.phase / total as f64).clamp(0.0, 1.0) as f32
+    }
+
+    /// 跳到指定进度 0..1（拖动进度条）。不分配，可在实时线程调用。
+    /// Seek to a progress 0..1 (progress-bar drag). Allocation-free; real-time safe.
+    pub fn seek_ratio(&mut self, ratio: f32) {
+        let r = if ratio.is_finite() {
+            ratio.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        self.phase = r as f64 * self.total_frames() as f64;
+    }
+
     /// 共享的欠载计数（克隆后供引擎侧读）。Shared underrun counter.
     pub fn underrun_counter(&self) -> Arc<AtomicU64> {
         self.underrun_count.clone()
@@ -230,6 +250,21 @@ mod tests {
         b.fill(&mut out, 3, 1.0);
         assert_eq!(&out[..3], &[0.0, 1.0, 2.0]);
         assert!(Arc::ptr_eq(&a.samples, &b.samples));
+    }
+
+    #[test]
+    fn seek_ratio_moves_phase_and_progress() {
+        let mut src = VarispeedSource::new(ramp(10));
+        src.seek_ratio(0.5);
+        assert_eq!(src.progress(), 0.5);
+        let mut out = vec![0.0; 2];
+        src.fill(&mut out, 2, 1.0);
+        assert_eq!(&out[..2], &[5.0, 6.0]);
+        // 越界值被钳制。Out-of-range values are clamped.
+        src.seek_ratio(7.0);
+        assert!(src.is_exhausted());
+        src.seek_ratio(f32::NAN);
+        assert_eq!(src.progress(), 0.0);
     }
 
     #[test]

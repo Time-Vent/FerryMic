@@ -48,4 +48,24 @@ export const icons = {
   phone: svg('<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>'),
   info: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>'),
   stopAll: svg('<rect x="5" y="5" width="14" height="14" rx="3"/>'),
+  folder: svg('<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2.2h7.4a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'),
+  folderPlus: svg('<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2.2h7.4a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
+  library: svg('<path d="M4.5 19.5V5M8.5 19.5V5M12.5 19.5 16 5.2l3.8 1-3.5 14.3"/>'),
+  chevron: svg('<path d="m9.5 6.5 5.5 5.5-5.5 5.5"/>'),
+  speed: svg('<path d="M4.5 16.5a7.5 7.5 0 1 1 15 0"/><path d="m12 16.5 3.5-4.5"/>'),
+  palette: svg('<path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.6-.9 1.2-1.8-.5-1.1.2-2.2 1.4-2.2h2.1a3.3 3.3 0 0 0 3.3-3.3C20 7.2 16.4 3.5 12 3.5z"/><circle cx="7.8" cy="11" r="1.1" fill="currentColor"/><circle cx="10.5" cy="7.6" r="1.1" fill="currentColor"/><circle cx="14.8" cy="7.9" r="1.1" fill="currentColor"/>'),
+  help: svg('<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.6M12 16.8h.01"/>'),
+  monitor: svg('<rect x="3.5" y="4.5" width="17" height="11.5" rx="2"/><path d="M9 20h6M12 16v4"/>'),
+  // 循环（小圈双箭头）与单次（中间带 1）。Repeat (two arrows in a loop) and once (with a 1).
+  repeat: svg('<path d="M17 3.5 19.5 6 17 8.5"/><path d="M4.5 11.5V10a4 4 0 0 1 4-4h11"/><path d="M7 20.5 4.5 18 7 15.5"/><path d="M19.5 12.5V14a4 4 0 0 1-4 4h-11"/>'),
+  repeatOnce: svg('<path d="M17 3.5 19.5 6 17 8.5"/><path d="M4.5 11.5V10a4 4 0 0 1 4-4h11"/><path d="M7 20.5 4.5 18 7 15.5"/><path d="M19.5 12.5V14a4 4 0 0 1-4 4h-11"/><path d="M11 10.5l1.3-.8V14.5" stroke-width="1.6"/>'),
+  // 独占（单个实心圆：只放这一个）与叠加（两个交叠的圆）。
+  // Exclusive (one solid circle: only this one) and overlap (two overlapping circles).
+  exclusive: svg('<circle cx="12" cy="12" r="7" fill="currentColor" fill-opacity="0.22"/><circle cx="12" cy="12" r="2.8" fill="currentColor" stroke="none"/>'),
+  overlap: svg('<circle cx="9" cy="12" r="5.5"/><circle cx="15" cy="12" r="5.5"/>'),
+  headphones: svg('<path d="M4 14.5V12a8 8 0 0 1 16 0v2.5"/><rect x="3.5" y="14" width="4" height="6.5" rx="1.5"/><rect x="16.5" y="14" width="4" height="6.5" rx="1.5"/>'),
+  // 虚拟麦克风（发送给游戏）：麦克风 + 向右的箭头。Virtual mic (sent to games): mic + arrow.
+  send: svg('<rect x="5" y="3.5" width="5.5" height="10" rx="2.75"/><path d="M2.5 11a5.25 5.25 0 0 0 10.5 0M7.75 16.5v4"/><path d="M15 12h6.5M18.5 9l3 3-3 3"/>'),
+  warning: svg('<path d="M12 4 21 19.5H3z"/><path d="M12 10v4.5M12 17h.01"/>'),
+  external: svg('<path d="M13.5 5.5h5v5M18.5 5.5 11 13M17 14v4.5a1 1 0 0 1-1 1H6.5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1H11"/>'),
 };

@@ -18,11 +18,14 @@
 //!   sends `Trigger` to the audio command queue on a hotkey press.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crossbeam_channel::{Receiver, Sender};
 use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
-use soundboard::{BoardCommand, SoundId};
+use soundboard::SoundId;
+
+use crate::loader::Player;
 
 /// 热键线程指令。Hotkey thread command.
 pub enum HotkeyCommand {
@@ -40,10 +43,10 @@ pub enum HotkeyCommand {
 
 /// 启动热键线程。Start the hotkey thread.
 ///
-/// `cmd_rx` 接收绑定指令；`cmd_tx` 是音频命令队列（热键触发时发 `Trigger`）。
-/// `cmd_rx` receives bind commands; `cmd_tx` is the audio command queue (receives
-/// `Trigger` on hotkey press).
-pub fn spawn_hotkey_thread(cmd_rx: Receiver<HotkeyCommand>, cmd_tx: Sender<BoardCommand>) {
+/// `cmd_rx` 接收绑定指令；热键按下时调用 `player.trigger`（未加载的音效会先加载）。
+/// `cmd_rx` receives bind commands; a hotkey press calls `player.trigger` (unloaded
+/// sounds are loaded first).
+pub fn spawn_hotkey_thread(cmd_rx: Receiver<HotkeyCommand>, player: Arc<Player>) {
     std::thread::Builder::new()
         .name("soundbridge-hotkeys".into())
         .spawn(move || {
@@ -56,7 +59,11 @@ pub fn spawn_hotkey_thread(cmd_rx: Receiver<HotkeyCommand>, cmd_tx: Sender<Board
                     for cmd in cmd_rx {
                         let HotkeyCommand::Bind { reply, .. } = cmd;
                         if let Some(r) = reply {
-                            let _ = r.send(Err("全局热键不可用".into()));
+                            let _ = r.send(Err(tr!(
+                                "全局热键不可用",
+                                "Global hotkeys are unavailable"
+                            )
+                            .into()));
                         }
                     }
                     return;
@@ -89,7 +96,7 @@ pub fn spawn_hotkey_thread(cmd_rx: Receiver<HotkeyCommand>, cmd_tx: Sender<Board
                 while let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
                     if event.state == HotKeyState::Pressed {
                         if let Some(sound_id) = bindings.sound_for(event.id) {
-                            let _ = cmd_tx.send(BoardCommand::Trigger { sound_id });
+                            player.trigger(sound_id);
                         }
                     }
                 }
@@ -122,10 +129,12 @@ impl Bindings {
         hotkey: Option<&str>,
     ) -> Result<(), String> {
         let new = match hotkey.map(str::trim).filter(|s| !s.is_empty()) {
-            Some(s) => Some(
-                s.parse::<HotKey>()
-                    .map_err(|e| format!("无法识别快捷键「{s}」：{e}"))?,
-            ),
+            Some(s) => Some(s.parse::<HotKey>().map_err(|e| {
+                trf!(
+                    "无法识别快捷键「{s}」：{e}",
+                    "Unrecognised hotkey \"{s}\": {e}"
+                )
+            })?),
             None => None,
         };
         let old = self.by_sound.get(&sound_id).copied();
@@ -134,11 +143,17 @@ impl Bindings {
         }
         if let Some(hk) = new {
             if let Some(other) = self.sound_for(hk.id()) {
-                return Err(format!("该快捷键已被音效 #{other} 使用"));
+                return Err(trf!(
+                    "该快捷键已被音效 #{other} 使用",
+                    "This hotkey is already used by sound #{other}"
+                ));
             }
-            manager
-                .register(hk)
-                .map_err(|e| format!("快捷键已被其他程序占用或不可用：{e}"))?;
+            manager.register(hk).map_err(|e| {
+                trf!(
+                    "快捷键已被其他程序占用或不可用：{e}",
+                    "The hotkey is taken by another program or unavailable: {e}"
+                )
+            })?;
         }
         if let Some(hk) = old {
             let _ = manager.unregister(hk);
