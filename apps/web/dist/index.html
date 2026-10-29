@@ -13,9 +13,9 @@
         if (t && t.mode && t.mode !== 'system') document.documentElement.dataset.theme = t.mode;
         if (t && t.vars) for (const k in t.vars) document.documentElement.style.setProperty(k, t.vars[k]);
       } catch (e) {}
-    </script>
-    <script type="module" crossorigin src="/assets/index-CMz97Nt7.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-B85Nj6Kt.css">
+    </script>
+    <script type="module" crossorigin src="/assets/index-CjbOzGR4.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-B1QnYptP.css">
   </head>
   <body>
     <!-- 应用外框：导航栏 + 文件夹栏 + 主区域。App shell: rail + folder sidebar + main. -->
@@ -110,15 +110,18 @@
             <input id="mic-gain" type="range" min="-30" max="24" step="1" value="0" />
             <span id="mic-gain-value" class="value">0 dB</span>
           </label>
-          <!-- 试听开关：音效同时在耳机里播放。Monitor switch: also hear the effects. -->
-          <button id="monitor-btn" class="mixer-btn" data-icon="headphones" title="试听：音效同时在耳机 / 扬声器里播放"></button>
+          <!-- 试听：点击开关；开启后鼠标移上去，右侧抽出试听音量条。
+               Monitor: click to toggle; when on, hovering slides out the monitor volume bar. -->
+          <div id="monitor-group" class="monitor-group">
+            <button id="monitor-btn" class="mixer-btn" data-icon="headphones" title="试听：音效同时在耳机 / 扬声器里播放"></button>
+            <label class="monitor-drawer" title="只影响自己耳机里的音效音量，别人听到的不变">
+              <input id="monitor-gain-bar" type="range" min="-40" max="12" step="1" value="0" aria-label="试听音量（双击恢复 0 dB）" />
+              <span id="monitor-gain-bar-value" class="value">0 dB</span>
+            </label>
+          </div>
           <!-- 输出目标：其他软件里该选哪个麦克风。Output target: which mic to pick in other apps. -->
           <button id="send-target" class="send-target" title="混音发送到哪里（点击修改）">
             <span class="send-icon"></span>
-            <span class="send-text">
-              <small id="send-label">其他软件的麦克风选</small>
-              <b id="send-name">—</b>
-            </span>
           </button>
         </footer>
       </main>
@@ -180,7 +183,12 @@
               <button type="button" id="hotkey-rec" class="hotkey-rec"></button>
               <button type="button" id="hotkey-clear" class="btn ghost small">清除</button>
             </div>
-            <small class="hint">点击后按下组合键（其他程序全屏时也能触发），Esc 取消</small>
+            <!-- 不拦截：按键照样传给游戏（Windows）。Pass-through: keys still reach the game (Windows). -->
+            <label class="switch-row windows-only">
+              <span>不拦截按键（游戏内组合）<small class="hint inline">按键照样传给游戏，可用对讲键 + 数字、鼠标侧键等任意组合</small></span>
+              <input type="checkbox" class="switch" id="edit-passthrough" />
+            </label>
+            <small class="hint" id="hotkey-hint">点击后按下组合键（其他程序全屏时也能触发），Esc 取消</small>
           </div>
           <p id="edit-file" class="file-line"></p>
         </div>
@@ -458,6 +466,6 @@
     </dialog>
 
     <div id="toasts" class="toasts" aria-live="assertive"></div>
-
+
   </body>
 </html>

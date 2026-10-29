@@ -46,9 +46,6 @@ const EN: Record<string, string> = {
   '麦克风音量（双击恢复 0 dB）': 'Mic volume (double-click for 0 dB)',
   '试听：音效同时在耳机 / 扬声器里播放': 'Monitor: also play effects on headphones / speakers',
   '混音发送到哪里（点击修改）': 'Where the mix is sent (click to change)',
-  其他软件的麦克风选: 'Mic to pick in other apps',
-  正在用扬声器输出: 'Outputting to speakers',
-  '其他软件收不到，点此改为虚拟音频线': "Other apps can't hear it — switch to a virtual cable",
   '混音正在输出到「{device}」，只有你自己能听到。点击在设置里改为虚拟音频线（如 CABLE Input）。':
     'The mix is going to "{device}", so only you can hear it. Click to switch to a virtual cable (e.g. CABLE Input) in Settings.',
   '你的声音 + 音效输出到「{device}」；其他软件的麦克风选「{mic}」。':
@@ -60,6 +57,7 @@ const EN: Record<string, string> = {
   已静音: 'Muted',
   '等待麦克风连接…': 'Waiting for the microphone…',
   '试听中：音效同时在「{device}」播放（点击关闭）': 'Monitoring: effects also play on "{device}" (click to turn off)',
+  '只影响自己耳机里的音效音量，别人听到的不变': 'Only changes the effects volume in your own headphones; what others hear stays the same',
   '试听已开启，但没有生效：{note}': "Monitor is on but not active: {note}",
   '试听已关闭：点击开启，音效同时在耳机 / 扬声器播放': 'Monitor is off: click to also play effects on headphones / speakers',
 
@@ -118,6 +116,13 @@ const EN: Record<string, string> = {
   '变速同时变调，双击滑块恢复 1.0×': 'Speed changes pitch too; double-click the slider for 1.0×',
   快捷键: 'Hotkey',
   清除: 'Clear',
+  '不拦截按键（游戏内组合）': "Don't block keys (in-game combo)",
+  '按键照样传给游戏，可用对讲键 + 数字、鼠标侧键等任意组合':
+    'Keys still reach the game; use any combo such as push-to-talk + a digit, or mouse side buttons',
+  '点击后先按住对讲键等，再按触发键，然后松开；也可以用鼠标侧键。Esc 取消':
+    'Click, hold your push-to-talk key (or any key), press the trigger key, then release; mouse side buttons work too. Esc cancels',
+  '不拦截：按键照样传给游戏': "Don't block: keys still reach the game",
+  '这个组合只能用「不拦截」方式，请重新录制': 'This combo only works with "Don\'t block keys"; please record again',
   '点击后按下组合键（其他程序全屏时也能触发），Esc 取消': 'Click, then press a key combo (works while other programs are full-screen); Esc cancels',
   取消: 'Cancel',
   保存: 'Save',

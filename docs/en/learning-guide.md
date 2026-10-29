@@ -304,6 +304,7 @@ Key functions: `resolve_output` (find a device by name), `build_output` (start s
 | `mic.rs` | the mic thread: picks a mic automatically, reconnects, guards against feedback |
 | `monitor.rs` | the monitor: sends the effects-only copy to the headphones |
 | `hotkeys.rs` | global hotkeys |
+| `passthrough.rs` | pass-through combos: observe keys with Windows low-level hooks while they still reach the game |
 | `remote.rs` | the phone remote: LAN listener, access code, QR code |
 | `settings.rs` | saving and loading settings (`settings.json`) |
 | `i18n.rs` | Chinese / English messages |

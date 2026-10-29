@@ -290,6 +290,7 @@ FerryMic/
 | `mic.rs` | 麦克风线程：自动选麦克风、断线重连、防反馈检查 |
 | `monitor.rs` | 试听：把只有音效的那份声音再送到耳机 |
 | `hotkeys.rs` | 全局快捷键 |
+| `passthrough.rs` | 「不拦截」组合键：用 Windows 底层钩子旁听按键，按键照样传给游戏 |
 | `remote.rs` | 手机遥控：局域网监听、访问码、二维码 |
 | `settings.rs` | 设置的保存与读取（`settings.json`） |
 | `i18n.rs` | 中英文提示语 |

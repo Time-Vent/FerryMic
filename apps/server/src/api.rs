@@ -28,7 +28,7 @@ use crate::library::{Entry, Library, ScanDiff, SoundDefaults};
 use crate::loader::Player;
 use crate::mic::{self, MicControl, MicRequest};
 use crate::monitor::{MonitorControl, MonitorRequest, MonitorStatus};
-use crate::remote::{qr_svg, RemoteServer, RemoteStatus};
+use crate::remote::{qr_svg, FromPhone, RemoteServer, RemoteStatus};
 use crate::settings::{
     is_hex_color, is_web_url, CloseAction, CustomSite, SettingsStore, ThemeMode, MAX_CUSTOM_SITES,
 };
@@ -109,12 +109,18 @@ impl AppState {
     }
 
     /// 让热键线程绑定快捷键并等待结果。Ask the hotkey thread to bind and await the result.
-    async fn bind_hotkey(&self, sound_id: SoundId, hotkey: Option<String>) -> Result<(), String> {
+    async fn bind_hotkey(
+        &self,
+        sound_id: SoundId,
+        hotkey: Option<String>,
+        passthrough: bool,
+    ) -> Result<(), String> {
         let (reply, rx) = crossbeam_channel::bounded(1);
         self.hotkey_tx
             .send(HotkeyCommand::Bind {
                 sound_id,
                 hotkey,
+                passthrough,
                 reply: Some(reply),
             })
             .map_err(|e| e.to_string())?;
@@ -127,10 +133,11 @@ impl AppState {
     }
 
     /// 绑定快捷键，不等结果（批量同步时用）。Bind without waiting (for bulk syncs).
-    fn bind_hotkey_async(&self, sound_id: SoundId, hotkey: Option<String>) {
+    fn bind_hotkey_async(&self, sound_id: SoundId, hotkey: Option<String>, passthrough: bool) {
         let _ = self.hotkey_tx.send(HotkeyCommand::Bind {
             sound_id,
             hotkey,
+            passthrough,
             reply: None,
         });
     }
@@ -139,13 +146,13 @@ impl AppState {
     /// Apply a scan diff to audio and hotkeys: unload + unbind removed, bind + preload added.
     fn apply_diff(&self, diff: &ScanDiff) {
         for &id in &diff.removed {
-            self.bind_hotkey_async(id, None);
+            self.bind_hotkey_async(id, None, false);
             self.player.unload(id);
         }
         for &id in &diff.added {
             if let Some(e) = self.library.entry(id) {
                 if e.meta.hotkey.is_some() {
-                    self.bind_hotkey_async(id, e.meta.hotkey.clone());
+                    self.bind_hotkey_async(id, e.meta.hotkey.clone(), e.meta.hotkey_passthrough);
                 }
             }
             self.player.preload(id);
@@ -164,6 +171,7 @@ impl AppState {
             gain_db: e.meta.gain_db,
             speed: e.meta.speed,
             hotkey: e.meta.hotkey.clone(),
+            hotkey_passthrough: e.meta.hotkey_passthrough,
             duration_secs: rt.duration_secs,
             loaded: rt.loaded,
             error: rt.error,
@@ -530,7 +538,10 @@ struct PlayingItem {
     progress: f32,
 }
 
-async fn get_live(State(state): State<AppState>) -> Json<LiveState> {
+async fn get_live(
+    State(state): State<AppState>,
+    phone: Option<axum::Extension<FromPhone>>,
+) -> Json<LiveState> {
     Json(LiveState {
         playing: state
             .playing
@@ -540,9 +551,11 @@ async fn get_live(State(state): State<AppState>) -> Json<LiveState> {
             .collect(),
         mic_level: state.mic.level(),
         mic_connected: state.mic.status().connected,
-        close_prompt: state
-            .close_prompt
-            .load(std::sync::atomic::Ordering::Relaxed),
+        // 关闭询问只给电脑上的窗口看，手机上不弹。The close prompt is for the PC window only.
+        close_prompt: phone.is_none()
+            && state
+                .close_prompt
+                .load(std::sync::atomic::Ordering::Relaxed),
     })
 }
 
@@ -645,8 +658,21 @@ async fn get_monitor(State(state): State<AppState>) -> Json<MonitorStatus> {
 
 async fn set_monitor(
     State(state): State<AppState>,
+    phone: Option<axum::Extension<FromPhone>>,
     Json(req): Json<MonitorPatch>,
 ) -> ApiResult<Json<MonitorStatus>> {
+    // 手机可以开关、调音量，但不能换电脑的试听设备。
+    // Phones may toggle and set the volume, but not change the computer's monitor device.
+    if phone.is_some() && req.device.is_some() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            tr!(
+                "试听设备请在电脑上选择",
+                "Choose the monitor device on the computer"
+            )
+            .to_string(),
+        ));
+    }
     if let Some(db) = req.gain_db.filter(|d| d.is_finite()) {
         let db = db.clamp(-40.0, 12.0);
         state.monitor.set_gain_db(db);
@@ -811,6 +837,8 @@ struct SoundItem {
     gain_db: f32,
     speed: f32,
     hotkey: Option<String>,
+    /// 快捷键不拦截（按键照样传给游戏）。Pass-through hotkey (keys still reach the game).
+    hotkey_passthrough: bool,
     /// 时长（秒），加载后才知道。Duration (seconds), known once loaded.
     duration_secs: Option<f32>,
     /// 是否已解码进内存。Whether decoded into memory.
@@ -886,7 +914,7 @@ async fn set_library_location(
             .set_root(path.clone(), req.move_contents)
             .map_err(bad_request)?;
         for id in old {
-            s.bind_hotkey_async(id, None);
+            s.bind_hotkey_async(id, None, false);
         }
         s.player.unload_all();
         s.settings.update(|st| st.library_dir = Some(path));
@@ -1102,6 +1130,8 @@ struct UpdateSoundRequest {
     speed: Option<f32>,
     #[serde(default, deserialize_with = "double_option")]
     hotkey: Option<Option<String>>,
+    /// 快捷键不拦截（按键照样传给游戏）。Pass-through hotkey (keys still reach the game).
+    hotkey_passthrough: Option<bool>,
 }
 
 async fn update_sound(
@@ -1118,13 +1148,15 @@ async fn update_sound(
     let hotkey = req
         .hotkey
         .map(|h| h.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
-    if let Some(hk) = &hotkey {
-        if *hk != current.meta.hotkey {
-            state
-                .bind_hotkey(id, hk.clone())
-                .await
-                .map_err(bad_request)?;
-        }
+    let passthrough = req
+        .hotkey_passthrough
+        .unwrap_or(current.meta.hotkey_passthrough);
+    let final_hotkey = hotkey.clone().unwrap_or(current.meta.hotkey.clone());
+    if final_hotkey != current.meta.hotkey || passthrough != current.meta.hotkey_passthrough {
+        state
+            .bind_hotkey(id, final_hotkey, passthrough)
+            .await
+            .map_err(bad_request)?;
     }
 
     let s = state.clone();
@@ -1182,6 +1214,7 @@ async fn update_sound(
             if let Some(hk) = hotkey {
                 m.hotkey = hk;
             }
+            m.hotkey_passthrough = passthrough;
         });
         let e = s.library.entry(id).ok_or((
             StatusCode::NOT_FOUND,
@@ -1197,7 +1230,7 @@ async fn remove_sound(
     State(state): State<AppState>,
     Path(id): Path<SoundId>,
 ) -> ApiResult<StatusCode> {
-    state.bind_hotkey_async(id, None);
+    state.bind_hotkey_async(id, None, false);
     state.player.unload(id);
     let s = state.clone();
     blocking(move || s.library.delete_sound(id).map_err(bad_request)).await??;

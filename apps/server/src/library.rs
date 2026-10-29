@@ -53,6 +53,11 @@ pub struct SoundMeta {
     pub speed: f32,
     #[serde(default)]
     pub hotkey: Option<String>,
+    /// 快捷键「不拦截」：按键照样传给游戏（见 `passthrough`）。默认拦截（系统热键）。
+    /// Pass-through hotkey: keys still reach the game (see `passthrough`). Off by
+    /// default (a system hotkey).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hotkey_passthrough: bool,
 }
 
 fn default_speed() -> f32 {
@@ -113,6 +118,7 @@ impl SoundMeta {
             gain_db: d.gain_db,
             speed: d.speed,
             hotkey: None,
+            hotkey_passthrough: false,
         }
     }
 
@@ -820,6 +826,7 @@ pub fn migrate_v1(data_dir: &Path, root: &Path) {
                 gain_db: spec.gain_db,
                 speed: spec.speed,
                 hotkey: spec.hotkey,
+                hotkey_passthrough: false,
             },
         );
     }

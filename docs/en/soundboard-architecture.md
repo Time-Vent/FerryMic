@@ -228,6 +228,20 @@ A library may point at a huge folder, and decoding everything into memory isn't 
   (the API returns 400) and the old key stays.
 - Hotkey strings are parsed by `HotKey::from_str`; the UI records them from the browser's `KeyboardEvent.code` in the form
   `Ctrl+Alt+KeyQ`. A lone letter / digit would swallow typing system-wide, so the UI requires a modifier.
+- **Two kinds** (chosen per sound, `hotkey_passthrough` in `.soundbridge.json`):
+  - **Blocking (default)**: a system hotkey via `RegisterHotKey`. The foreground program doesn't receive the key, and only
+    Ctrl / Alt / Shift / Win can be modifiers.
+  - **Pass-through (in-game combo, Windows)** (`passthrough.rs`): low-level hooks `WH_KEYBOARD_LL` / `WH_MOUSE_LL` only
+    observe and always pass on with `CallNextHookEx`, so "push-to-talk + 1" can play a sound in FerryMic and switch
+    weapons in the game at once. Combos are key names in press order (the last is the trigger, the rest must be held),
+    e.g. `KeyV+Digit1`, `Mouse4+Digit2`; holding extra keys doesn't prevent a match.
+    - The hooks live on a dedicated thread `soundbridge-combo-hook` with a blocking `GetMessageW` loop (low-level hook
+      callbacks run through it) and start when the first pass-through combo appears. The callback only looks up the table
+      (`try_read`; if the lock is busy it skips) and sends the sound id over a channel; the forwarding thread
+      `soundbridge-combo` calls `Player::trigger`, so system-wide input is never held up.
+    - Both kinds share one binding table; conflicts are checked by an order-independent signature (the same keys can't belong to two sounds).
+    - Limits: input to a program running as administrator isn't seen while it's in front; Linux / macOS aren't supported
+      yet (the API returns an error and the UI hides the option).
 
 ## 9. Desktop app (`apps/app`)
 
@@ -275,7 +289,10 @@ phone browser ──HTTP / LAN──▶ FerryMic on the computer ──commands�
     a 401 page is returned.
   - "New access code" invalidates the old one immediately.
   - Desktop-only endpoints (`/api/remote`, `/api/settings`, `/api/pick-folder`, `/api/library/location`,
-    `/api/library/open`, `/api/output`, `/api/monitor`, `/api/open-url`) allow only GET from phones.
+    `/api/library/open`, `/api/output`, `/api/open-url`, `/api/window`) allow only GET from phones.
+  - The close prompt is for the PC window only: `/api/live` always returns `close_prompt: false` to phone requests.
+  - `require_token` marks phone requests with `FromPhone`: phones may toggle the monitor and set its volume
+    (`POST /api/monitor`), but the handler refuses (403) a monitor device change based on that mark.
 - The panel shows the address and a QR code (SVG from the `qrcode` crate, `GET /api/remote/qr.svg`);
   the computer's LAN IP is found by querying the routing table, without sending packets.
 - `SOUNDBRIDGE_LAN=1/0` forces it on / off (overrides the setting).
@@ -290,7 +307,7 @@ phone browser ──HTTP / LAN──▶ FerryMic on the computer ──commands�
   the soundboard and the mic both run at that rate.
 - **Classification** (`describe_output`): if an input device forms a feedback loop with it (its other end, `game_mic_for`),
   or its name is virtual → `Virtual`, together with the mic other apps should pick (e.g. `CABLE Input` → `CABLE Output`);
-  otherwise `Speaker`. The bottom bar shows "Mic to pick in other apps: …", or a yellow warning when outputting to a speaker.
+  otherwise `Speaker`. The rightmost icon in the bottom bar tells the mic to pick in other apps, or turns into a yellow warning when outputting to a speaker.
 - **Switching at runtime** (`POST /api/output`): the output thread receives `OutputRequest::Select`, drops the old stream,
   builds a new `SoundBoard`, runs `reinstall_all` for the decoded sounds, then opens the new device; on failure it
   reopens the previous device and returns 400. On success it notifies the mic thread (`OutputChanged`) and the
@@ -307,7 +324,11 @@ The output goes to a virtual cable, so you can't hear the effects yourself. The 
   and any backlog over 60 ms is dropped, so drift between the two clocks doesn't keep adding latency.
 - **Skipped when pointless**: if the main output is itself a speaker, or the monitor device is the main output device,
   the status shows why and nothing is opened.
-- Settings: switch (on by default), device (default = system default playback device), volume; the headphones button at the bottom toggles it.
+- Settings: switch (on by default), device (default = system default playback device), volume. Clicking the headphones button at the
+  bottom toggles the monitor; while it's on, hovering slides out the monitor volume bar on its right (the space is
+  reserved while on and the bar is revealed with `clip-path`, so the button never moves from under the cursor; on
+  devices without hover, such as phones, it stays visible).
+- **How the volumes relate**: the volume on a card affects what others and you hear; the monitor volume only scales the monitor path, so only you hear the change.
 - Ring hand-over works like the mic's: the new ring goes to the output callback over a channel, the old ring returns to the control side to be freed.
 
 ### 11.3 Linux automatic virtual microphone (`virtual_mic.rs`)
@@ -335,8 +356,8 @@ FerryMic output ──▶ virtual output soundbridge_mix (module-null-sink, desc
   `sites.ts` (built-in sound sites), `main.ts` (UI logic).
 - **Layout**: a slim left rail (library, sound sites, phone remote switch — its waves light up when on — help, settings),
   a folder sidebar (folder tree + new / rescan + library location), the sound card grid in the middle (search / stop all /
-  import), and a bottom bar: your mic (mute / level / volume), the monitor button (headphones), and the output target
-  ("Mic to pick in other apps: CABLE Output"; click for Settings → "Audio chain").
+  import), and a bottom bar: your mic (mute / level / volume), the monitor button (headphones; when on, hovering slides
+  out its volume bar), and the output target icon (hover for the mic to pick; click for Settings → "Audio chain").
 - **Wording**: the UI doesn't name specific apps (games, Discord, …); it says "output line" and "other apps".
 - On narrow screens (≤720 px, phone remote) both sidebars hide, folders become horizontal chips at the top, and the settings button moves to the toolbar.
 - **Folders**: selecting a folder shows its sounds (including subfolders); the "⋯" menu creates subfolders / renames / deletes;

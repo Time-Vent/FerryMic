@@ -7,7 +7,13 @@ $ErrorActionPreference = "Stop"
 
 # 工具链路径（与 start-*.ps1 一致）。Toolchain paths (same as start-*.ps1).
 $env:CARGO_TARGET_DIR = "C:\Users\susha\AppData\Local\Temp\sb-target"
-$env:PATH = "C:\Users\susha\.cargo\bin;C:\Users\susha\AppData\Local\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin;C:\Program Files\nodejs;$env:APPDATA\npm;" + $env:PATH
+# pnpm 装在 npm 全局目录；有的终端没有 APPDATA 变量，所以和上面一样直接写路径。
+# pnpm lives in the npm global folder; some terminals lack APPDATA, so spell the path out like the others.
+$npmGlobal = "C:\Users\susha\AppData\Roaming\npm"
+$env:PATH = "C:\Users\susha\.cargo\bin;C:\Users\susha\AppData\Local\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin;C:\Program Files\nodejs;$npmGlobal;" + $env:PATH
+foreach ($tool in "node", "pnpm", "cargo") {
+  if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "找不到 $tool / $tool not found (PATH: $env:PATH)" }
+}
 Set-Location $PSScriptRoot
 
 # 1. 前端（会被嵌入可执行文件）。Front-end (embedded into the executable).

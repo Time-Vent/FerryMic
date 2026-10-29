@@ -158,6 +158,7 @@ function hotkeyParts(hotkey: string): string[] {
     Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']',
     Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/',
     Space: 'Space', Super: 'Win',
+    MouseMiddle: 'Mouse 3', Mouse4: 'Mouse 4', Mouse5: 'Mouse 5',
   };
   return hotkey.split('+').map((p) => {
     if (names[p]) return names[p];
@@ -168,8 +169,9 @@ function hotkeyParts(hotkey: string): string[] {
   });
 }
 
-function kbd(hotkey: string): HTMLElement {
-  const wrap = el('span', 'kbd');
+function kbd(hotkey: string, passthrough = false): HTMLElement {
+  const wrap = el('span', passthrough ? 'kbd passthrough' : 'kbd');
+  if (passthrough) wrap.title = t('不拦截：按键照样传给游戏');
   for (const part of hotkeyParts(hotkey)) wrap.appendChild(el('kbd', '', part));
   return wrap;
 }
@@ -567,7 +569,7 @@ function renderPad(s: Sound): HTMLElement {
     const meta = el('div', 'pad-meta');
     const time = el('span', 'pad-time', formatDuration(s.duration_secs));
     meta.appendChild(time);
-    if (s.hotkey) meta.appendChild(kbd(s.hotkey));
+    if (s.hotkey) meta.appendChild(kbd(s.hotkey, s.hotkey_passthrough));
     // 「全部」视图里显示所在文件夹。Show the folder in the "all" view.
     if (s.folder && s.folder !== currentFolder) {
       const tag = el('span', 'tag folder-tag', folderName(s.folder));
@@ -983,6 +985,42 @@ function setupImport(): void {
 
 let editing: Sound | null = null;
 let editHotkey: string | null = null;
+
+/** 编辑框里「不拦截」开关是否打开。Whether the editor's pass-through switch is on. */
+function editPassthrough(): boolean {
+  return $<HTMLInputElement>('edit-passthrough').checked;
+}
+
+/** 修饰键统一成后端的写法（左右不分）。Normalise modifiers to the backend's names (no left / right). */
+function normalizeKey(code: string): string {
+  if (/^Control(Left|Right)$/.test(code)) return 'Ctrl';
+  if (/^Shift(Left|Right)$/.test(code)) return 'Shift';
+  if (/^Alt(Left|Right)$/.test(code)) return 'Alt';
+  if (/^(Meta|OS)(Left|Right)$/.test(code)) return 'Super';
+  return code;
+}
+
+/** 系统热键（拦截）能否表示这个组合：前面只能是修饰键，且不含鼠标键。
+ *  Whether a system (blocking) hotkey can express the combo: only modifiers before the
+ *  last key, and no mouse buttons. */
+function fitsSystemHotkey(hk: string): boolean {
+  const parts = hk.split('+');
+  const last = parts.pop() ?? '';
+  return !/^Mouse/.test(last) && parts.every((p) => ['Ctrl', 'Alt', 'Shift', 'Super'].includes(p));
+}
+
+/** 单独一个键是否允许（字母 / 数字会挡住打字）。Whether a single key is allowed (letters /
+ *  digits would get in the way of typing). */
+function singleKeyAllowed(hk: string): boolean {
+  return /^(F\d{1,2}|Numpad.*|Pause|ScrollLock|Insert|Home|End|PageUp|PageDown|Mouse.*)$/.test(hk);
+}
+
+/** 更新快捷键说明（两种方式录法不同）。Update the hotkey hint (the two kinds record differently). */
+function renderHotkeyHint(): void {
+  $('hotkey-hint').textContent = editPassthrough()
+    ? t('点击后先按住对讲键等，再按触发键，然后松开；也可以用鼠标侧键。Esc 取消')
+    : t('点击后按下组合键（其他程序全屏时也能触发），Esc 取消');
+}
 let deleteArmed = false;
 
 function renderHotkeyButton(recording = false): void {
@@ -991,7 +1029,7 @@ function renderHotkeyButton(recording = false): void {
   btn.classList.toggle('has-key', !!editHotkey && !recording);
   btn.innerHTML = '';
   if (recording) btn.textContent = t('请按下组合键…');
-  else if (editHotkey) btn.appendChild(kbd(editHotkey));
+  else if (editHotkey) btn.appendChild(kbd(editHotkey, editPassthrough()));
   else btn.textContent = t('点击设置快捷键');
 }
 
@@ -1011,37 +1049,95 @@ function hotkeyFromEvent(e: KeyboardEvent): string | null {
 function setupHotkeyRecorder(): void {
   const btn = $<HTMLButtonElement>('hotkey-rec');
   let recording = false;
+  // 「不拦截」录制：按下顺序记录按住的键，第一次松开时定下组合（最后按下的是触发键）。
+  // Pass-through recording: keys held, in press order; the combo is fixed on the first
+  // release (the last key pressed is the trigger).
+  let held: string[] = [];
+  const mouseNames: Record<number, string> = { 1: 'MouseMiddle', 3: 'Mouse4', 4: 'Mouse5' };
+
   const stop = () => {
     recording = false;
+    held = [];
     window.removeEventListener('keydown', onKey, true);
+    window.removeEventListener('keyup', onKeyUp, true);
+    window.removeEventListener('mousedown', onMouseDown, true);
+    window.removeEventListener('mouseup', onMouseUp, true);
+    window.removeEventListener('auxclick', swallow, true);
     renderHotkeyButton(false);
   };
-  const onKey = (e: KeyboardEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.code === 'Escape') return stop();
-    const hk = hotkeyFromEvent(e);
-    if (!hk) return;
-    const plain = !hk.includes('+');
-    // 单独的字母/数字等会在全局拦截打字，要求带修饰键（功能键、小键盘除外）。
-    // A bare letter/digit would hijack typing system-wide; require a modifier
-    // (function keys and numpad excepted).
-    if (plain && !/^(F\d{1,2}|Numpad.*|Pause|ScrollLock|Insert|Home|End|PageUp|PageDown)$/.test(hk)) {
+  const accept = (hk: string) => {
+    // 单独的字母 / 数字会挡住打字，要求组合（功能键、小键盘、鼠标侧键等除外）。
+    // A lone letter / digit would get in the way of typing; require a combo (function
+    // keys, numpad, mouse buttons and the like excepted).
+    if (!hk.includes('+') && !singleKeyAllowed(hk)) {
       toast(t('单个字母或数字会影响打字，请加上 Ctrl / Alt / Shift'), 'error');
+      held = [];
       return;
     }
     editHotkey = hk;
     stop();
   };
+  const swallow = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const onKey = (e: KeyboardEvent) => {
+    swallow(e);
+    if (e.code === 'Escape' && !held.length) return stop();
+    if (editPassthrough()) {
+      if (e.repeat) return;
+      const key = normalizeKey(e.code);
+      if (!held.includes(key)) held.push(key);
+      return;
+    }
+    const hk = hotkeyFromEvent(e);
+    if (hk) accept(hk);
+  };
+  const onKeyUp = (e: KeyboardEvent) => {
+    swallow(e);
+    if (editPassthrough() && held.length) accept(held.join('+'));
+  };
+  // 鼠标中键 / 侧键（只在「不拦截」方式下可用）；拦下浏览器的「后退 / 前进」。
+  // Middle / side mouse buttons (pass-through only); block the browser's back / forward.
+  const onMouseDown = (e: MouseEvent) => {
+    const name = mouseNames[e.button];
+    if (!name || !editPassthrough()) return;
+    swallow(e);
+    if (!held.includes(name)) held.push(name);
+  };
+  const onMouseUp = (e: MouseEvent) => {
+    if (!mouseNames[e.button] || !editPassthrough()) return;
+    swallow(e);
+    if (held.length) accept(held.join('+'));
+  };
+
   btn.addEventListener('click', () => {
     if (recording) return stop();
     recording = true;
+    held = [];
     renderHotkeyButton(true);
     window.addEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('mousedown', onMouseDown, true);
+    window.addEventListener('mouseup', onMouseUp, true);
+    window.addEventListener('auxclick', swallow, true);
   });
   $('hotkey-clear').addEventListener('click', () => {
     editHotkey = null;
     stop();
+  });
+  // 切到「拦截」时，系统热键表示不了的组合（如对讲键 + 数字、鼠标键）要清掉重录。
+  // Switching to blocking: combos a system hotkey can't express (push-to-talk + digit,
+  // mouse buttons) must be cleared and recorded again.
+  $('edit-passthrough').addEventListener('change', () => {
+    stop();
+    if (editHotkey && !editPassthrough() && !fitsSystemHotkey(editHotkey)) {
+      editHotkey = null;
+      toast(t('这个组合只能用「不拦截」方式，请重新录制'));
+    }
+    renderHotkeyHint();
+    renderHotkeyButton(false);
   });
   $<HTMLDialogElement>('edit-dialog').addEventListener('close', stop);
 }
@@ -1063,6 +1159,8 @@ function openEditor(s: Sound): void {
   $<HTMLInputElement>('edit-looping').checked = s.looping;
   $<HTMLInputElement>('edit-exclusive').checked = s.exclusive;
   editHotkey = s.hotkey;
+  $<HTMLInputElement>('edit-passthrough').checked = s.hotkey_passthrough;
+  renderHotkeyHint();
   renderHotkeyButton(false);
   $('edit-file').textContent = s.error
     ? t('文件：{file}（{error}）', { file: s.file_name, error: s.error })
@@ -1102,6 +1200,7 @@ function setupEditor(): void {
       gain_db: Number(data.get('gain_db')),
       speed: Number(data.get('speed')),
       hotkey: editHotkey,
+      hotkey_passthrough: editPassthrough(),
     };
     const name = String(data.get('name') ?? '').trim();
     const folder = String(data.get('folder') ?? '');
@@ -1247,8 +1346,6 @@ function renderSendTarget(o: OutputInfo): void {
   const warn = o.output_kind === 'speaker';
   btn.classList.toggle('warn', warn);
   btn.querySelector('.send-icon')!.innerHTML = warn ? icons.warning : icons.send;
-  $('send-label').textContent = warn ? t('正在用扬声器输出') : t('其他软件的麦克风选');
-  $('send-name').textContent = warn ? t('其他软件收不到，点此改为虚拟音频线') : (o.game_mic ?? o.output_device);
   btn.title = warn
     ? t('混音正在输出到「{device}」，只有你自己能听到。点击在设置里改为虚拟音频线（如 CABLE Input）。', { device: o.output_device })
     : t('你的声音 + 音效输出到「{device}」；其他软件的麦克风选「{mic}」。', {
@@ -1272,6 +1369,10 @@ function renderSendTarget(o: OutputInfo): void {
   }
 }
 
+/** 试听音量滑条：设置里一个，底部抽屉里一个，两者保持同步。
+ *  Monitor volume sliders: one in settings, one in the bottom drawer, kept in sync. */
+const MONITOR_GAINS = ['monitor-gain', 'monitor-gain-bar'];
+
 /** 试听：开关、设备、音量、状态，以及底部的耳机按钮。
  *  Monitor: switch, device, volume, status, and the headphones button at the bottom. */
 function renderMonitor(m: MonitorStatus): void {
@@ -1286,6 +1387,7 @@ function renderMonitor(m: MonitorStatus): void {
       ? t('试听中：音效同时在「{device}」播放（点击关闭）', { device: m.device ?? '' })
       : t('试听已开启，但没有生效：{note}', { note: m.note ?? '' })
     : t('试听已关闭：点击开启，音效同时在耳机 / 扬声器播放');
+  $('monitor-group').classList.toggle('enabled', m.enabled);
 
   const select = $<HTMLSelectElement>('monitor-select');
   if (document.activeElement !== select) {
@@ -1298,11 +1400,12 @@ function renderMonitor(m: MonitorStatus): void {
     select.value = m.selection ?? '';
     select.disabled = !m.enabled;
   }
-  const gain = $<HTMLInputElement>('monitor-gain');
-  if (document.activeElement !== gain) {
+  for (const id of MONITOR_GAINS) {
+    const gain = $<HTMLInputElement>(id);
+    if (document.activeElement === gain) continue;
     gain.value = String(m.gain_db);
     syncRangeFill(gain);
-    $('monitor-gain-value').textContent = formatGain(m.gain_db);
+    $(`${id}-value`).textContent = formatGain(m.gain_db);
   }
   $('monitor-status').textContent = !m.enabled
     ? t('已关闭')
@@ -1315,6 +1418,7 @@ function renderAppInfo(info: AppInfo): void {
   appInfo = info;
   applyTheme(info.theme_mode, info.accent);
   document.body.classList.toggle('is-app', info.is_app);
+  document.body.classList.toggle('is-windows', info.platform === 'windows');
   renderSendTarget(info.output);
   renderRemote(info.remote);
   $('app-version').textContent = `v${info.version}`;
@@ -1445,18 +1549,29 @@ function setupSettings(): void {
     const v = (ev.target as HTMLSelectElement).value;
     setMonitor({ device: v || null });
   });
-  const mGain = $<HTMLInputElement>('monitor-gain');
   let mTimer = 0;
-  mGain.addEventListener('input', () => {
-    const v = Number(mGain.value);
-    $('monitor-gain-value').textContent = formatGain(v);
-    clearTimeout(mTimer);
-    mTimer = window.setTimeout(() => api.setMonitor({ gain_db: v }).catch(() => {}), 120);
-  });
-  mGain.addEventListener('dblclick', () => {
-    mGain.value = '0';
-    mGain.dispatchEvent(new Event('input'));
-  });
+  for (const id of MONITOR_GAINS) {
+    const mGain = $<HTMLInputElement>(id);
+    mGain.addEventListener('input', () => {
+      const v = Number(mGain.value);
+      // 另一个滑条跟着动。Move the other slider along.
+      for (const other of MONITOR_GAINS) {
+        const o = $<HTMLInputElement>(other);
+        if (o !== mGain) {
+          o.value = mGain.value;
+          syncRangeFill(o);
+        }
+        $(`${other}-value`).textContent = formatGain(v);
+      }
+      if (monitor) monitor.gain_db = v;
+      clearTimeout(mTimer);
+      mTimer = window.setTimeout(() => api.setMonitor({ gain_db: v }).catch(() => {}), 120);
+    });
+    mGain.addEventListener('dblclick', () => {
+      mGain.value = '0';
+      mGain.dispatchEvent(new Event('input'));
+    });
+  }
 
   $('vmic-toggle').addEventListener('change', async (ev) => {
     try {

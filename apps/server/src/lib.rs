@@ -23,6 +23,7 @@ mod library;
 mod loader;
 mod mic;
 mod monitor;
+mod passthrough;
 mod remote;
 mod settings;
 mod virtual_mic;
@@ -275,6 +276,7 @@ pub async fn run(config: ServerConfig, on_ready: impl FnOnce(ServerInfo)) -> any
             let _ = hotkey_tx.send(hotkeys::HotkeyCommand::Bind {
                 sound_id: e.meta.id,
                 hotkey: e.meta.hotkey.clone(),
+                passthrough: e.meta.hotkey_passthrough,
                 reply: None,
             });
         }

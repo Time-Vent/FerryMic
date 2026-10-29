@@ -126,9 +126,13 @@ code {
 }
 
 /* ---- 外框 Shell ---- */
+/* 100dvh = 手机浏览器工具栏之间真正可见的高度（100vh 会被底部工具栏挡住）；100vh 留作旧浏览器的后备。
+   100dvh = the height actually visible between phone browser toolbars (100vh ends up behind the
+   bottom toolbar); 100vh stays as a fallback for older browsers. */
 .app {
   display: flex;
   height: 100vh;
+  height: 100dvh;
 }
 
 .rail {
@@ -1164,14 +1168,67 @@ code {
   color: var(--warn);
 }
 
+/* 试听开启后，鼠标移到耳机按钮上，右侧抽出试听音量条（抽屉效果）。
+   开启时就预留好位置，只用 clip-path 把音量条“拉出来”，耳机按钮不会被挤走、跑出鼠标下面。
+   When the monitor is on, hovering the headphones button slides out its volume bar (drawer).
+   The space is reserved while it's on and the bar is revealed with clip-path, so the button
+   never shifts out from under the cursor. */
+.monitor-group {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.monitor-drawer {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  width: 160px;
+  margin-left: 10px;
+  padding: 6px 0;
+  opacity: 0;
+  clip-path: inset(0 100% 0 0);
+  pointer-events: none;
+  transition: clip-path 0.22s ease, opacity 0.15s;
+}
+
+.monitor-group.enabled .monitor-drawer {
+  display: flex;
+}
+
+.monitor-drawer input {
+  flex: 1;
+  min-width: 0;
+}
+
+.monitor-drawer .value {
+  min-width: 40px;
+}
+
+.monitor-group.enabled:hover .monitor-drawer,
+.monitor-group.enabled:has(:focus-visible) .monitor-drawer {
+  opacity: 1;
+  clip-path: inset(0 0 0 0);
+  pointer-events: auto;
+}
+
+/* 手机等没有悬停的设备：开启时一直显示。No hover (phones): always shown while on. */
+@media (hover: none) {
+  .monitor-group.enabled .monitor-drawer {
+    width: 120px;
+    margin-left: 8px;
+    opacity: 1;
+    clip-path: none;
+    pointer-events: auto;
+  }
+}
+
 /* 发送目标：游戏里该选哪个麦克风。Send target: which mic to pick in games. */
 .send-target {
   display: flex;
   align-items: center;
-  gap: 9px;
-  max-width: 260px;
-  min-width: 0;
-  padding: 6px 12px 6px 9px;
+  flex: none;
+  padding: 3px;
   border-radius: 11px;
   border: 1px solid var(--border);
   background: var(--card);
@@ -1201,26 +1258,6 @@ code {
   height: 17px;
 }
 
-.send-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.25;
-}
-
-.send-text small {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.send-text b {
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .send-target.warn {
   border-color: color-mix(in srgb, var(--warn) 45%, transparent);
 }
@@ -1228,16 +1265,6 @@ code {
 .send-target.warn .send-icon {
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 16%, transparent);
-}
-
-.send-target.warn small {
-  color: var(--warn);
-}
-
-.send-target.warn b {
-  font-weight: 500;
-  font-size: 12px;
-  color: var(--muted);
 }
 
 /* 音效资源按钮：地球右上角的小音符。Sound sites button: a small note at the globe's top right. */
@@ -1414,6 +1441,7 @@ input[type='range']::-webkit-slider-thumb {
 .dialog {
   width: min(480px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   padding: 0;
   border: 1px solid var(--border-strong);
   border-radius: 18px;
@@ -1447,7 +1475,9 @@ input[type='range']::-webkit-slider-thumb {
 .dialog.settings {
   margin: 0 auto 0 var(--rail-w);
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
   width: min(440px, calc(100vw - var(--rail-w)));
   border-radius: 0 18px 18px 0;
   border-left: none;
@@ -1486,6 +1516,7 @@ input[type='range']::-webkit-slider-thumb {
 
 .dialog.settings .dialog-body {
   max-height: calc(100vh - 60px);
+  max-height: calc(100dvh - 60px);
   padding-bottom: 24px;
 }
 
@@ -1574,6 +1605,17 @@ input[type='range']::-webkit-slider-thumb {
 }
 
 /* 仅桌面 App 显示（浏览器 / 手机里隐藏）。Desktop app only (hidden in browsers / phones). */
+/* 只在 Windows 上有意义的选项。Options that only make sense on Windows. */
+body:not(.is-windows) .windows-only {
+  display: none !important;
+}
+
+/* 不拦截的快捷键用虚线框区分。Pass-through hotkeys get a dashed outline. */
+.kbd.passthrough kbd {
+  border-style: dashed;
+  border-bottom-width: 1px;
+}
+
 body:not(.is-app) .app-only {
   display: none !important;
 }
@@ -2041,9 +2083,6 @@ summary {
     width: 130px;
   }
 
-  .send-target {
-    max-width: 190px;
-  }
 
   .mic-label {
     display: none;
@@ -2119,15 +2158,26 @@ summary {
   }
 
   .send-target {
-    max-width: none;
-    flex: 1;
+    order: 2;
+  }
+
+  /* 窄屏：试听开启时，耳机按钮 + 音量条单独占一行，不挤麦克风名字。
+     Narrow screens: while the monitor is on, the button + bar get their own row. */
+  .monitor-group.enabled {
     order: 4;
+    flex: 1 1 100%;
+  }
+
+  .monitor-group.enabled .monitor-drawer {
+    flex: 1;
+    width: auto;
   }
 
   .dialog.settings {
     margin: auto;
     height: auto;
     max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
     width: calc(100vw - 24px);
     border-radius: 18px;
     border-left: 1px solid var(--border-strong);

@@ -20,6 +20,8 @@ export interface Sound {
   gain_db: number;
   speed: number;
   hotkey: string | null;
+  /** 快捷键不拦截：按键照样传给游戏。Pass-through hotkey: keys still reach the game. */
+  hotkey_passthrough: boolean;
   /** 时长（秒），加载后才知道。Duration (seconds), known once loaded. */
   duration_secs: number | null;
   /** 是否已解码进内存。Whether decoded into memory. */
@@ -155,6 +157,7 @@ export interface SoundPatch {
   gain_db?: number;
   speed?: number;
   hotkey?: string | null;
+  hotkey_passthrough?: boolean;
 }
 
 export interface SettingsPatch {

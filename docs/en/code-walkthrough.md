@@ -383,7 +383,8 @@ cmd_tx.send(BoardCommand::AddSound(Box::new(loaded)))?;
 | `remote.rs` | `RemoteServer`: start / stop the phone remote listener, access-code middleware `require_token`, `qr_svg` |
 | `settings.rs` | `SettingsStore`: reads / writes `settings.json`; `data_dir()` (per platform); `CloseAction`; `CustomSite`, `is_web_url`; rename migration `migrate_legacy_data_dir` |
 | `i18n.rs` | UI language: `apply` / `is_en`, macros `tr!` / `trf!` produce messages and errors in the current language |
-| `hotkeys.rs` | global hotkey thread (Win32 message loop + bind requests); calls `Player::trigger` on key press |
+| `hotkeys.rs` | global hotkey thread (Win32 message loop + bind requests); calls `Player::trigger` on key press; manages both kinds of bindings |
+| `passthrough.rs` | pass-through combos: `Combo` parsing and matching, Windows low-level keyboard / mouse hooks (observe only, always pass on) |
 | `virtual_mic.rs` | Linux virtual mic: create / take over / unload modules with `pactl` |
 
 ### Start-up order (`run`)
@@ -451,7 +452,9 @@ by the dedicated thread `soundbridge-output`, which also closes the old stream a
 
 ### Hotkey thread (`hotkeys.rs`)
 
-- `Bindings::bind`: parse → check whether another sound uses it → register the new key → release the old key → update the table.
+- `Bindings::bind(sound, hotkey, passthrough)`: parse (system hotkey or `Combo`) → check by signature whether another sound
+  uses it → activate the new one (register the system hotkey or start the hooks) → release the old one → update the table
+  and hand all combos to the hook (`passthrough::set_combos`).
 - `pump_messages`: dispatches `WM_HOTKEY` on Windows (without it hotkeys never fire); empty on other platforms.
 
 ### `MicControl` (`mic.rs`)

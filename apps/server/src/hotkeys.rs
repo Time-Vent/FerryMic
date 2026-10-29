@@ -16,6 +16,12 @@
 //!   **on the same thread** (on Windows `WM_HOTKEY` is only delivered to the creating
 //!   thread; without a message loop hotkeys never fire); handles bind requests and
 //!   sends `Trigger` to the audio command queue on a hotkey press.
+//! - 「不拦截」组合（按键照样传给游戏）走 [`crate::passthrough`] 的底层钩子，由钩子线程发现、
+//!   转发线程触发；绑定表仍由这里统一管理，两种方式之间也检查冲突。
+//!   Pass-through combos (keys still reach the game) use the low-level hooks in
+//!   [`crate::passthrough`], detected on the hook thread and triggered by a forwarding
+//!   thread; the binding table is still managed here, with conflicts checked across
+//!   both kinds.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,17 +32,22 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use soundboard::SoundId;
 
 use crate::loader::Player;
+use crate::passthrough::{self, Combo, Signature};
 
 /// 热键线程指令。Hotkey thread command.
 pub enum HotkeyCommand {
-    /// 把音效绑定到快捷键（`None` = 解绑）。先注册新键成功后才释放旧键，失败时保留旧键。
-    /// 结果经 `reply` 返回（可为 `None`，表示不关心结果）。
-    /// Bind a sound to a hotkey (`None` = unbind). The new key is registered before the
-    /// old one is released, so a failure keeps the old key. The result goes to
-    /// `reply` (optional).
+    /// 把音效绑定到快捷键（`None` = 解绑）。`passthrough` 为真时用「不拦截」组合
+    /// （按键照样传给前台程序，见 [`crate::passthrough`]），否则用系统热键。
+    /// 先注册新键成功后才释放旧键，失败时保留旧键。结果经 `reply` 返回（可为 `None`）。
+    /// Bind a sound to a hotkey (`None` = unbind). With `passthrough` it's a
+    /// pass-through combo (keys still reach the foreground program, see
+    /// [`crate::passthrough`]), otherwise a system hotkey. The new key is registered
+    /// before the old one is released, so a failure keeps the old key. The result goes
+    /// to `reply` (optional).
     Bind {
         sound_id: SoundId,
         hotkey: Option<String>,
+        passthrough: bool,
         reply: Option<Sender<Result<(), String>>>,
     },
 }
@@ -47,6 +58,22 @@ pub enum HotkeyCommand {
 /// `cmd_rx` receives bind commands; a hotkey press calls `player.trigger` (unloaded
 /// sounds are loaded first).
 pub fn spawn_hotkey_thread(cmd_rx: Receiver<HotkeyCommand>, player: Arc<Player>) {
+    // 「不拦截」组合由钩子线程发现，经通道交给这个转发线程去触发（钩子里不能做慢事）。
+    // Pass-through combos are detected on the hook thread and handed over a channel to
+    // this forwarding thread to trigger (the hook must not do slow work).
+    let (combo_tx, combo_rx) = crossbeam_channel::unbounded::<SoundId>();
+    {
+        let player = player.clone();
+        std::thread::Builder::new()
+            .name("soundbridge-combo".into())
+            .spawn(move || {
+                for id in combo_rx {
+                    player.trigger(id);
+                }
+            })
+            .expect("spawn combo thread");
+    }
+
     std::thread::Builder::new()
         .name("soundbridge-hotkeys".into())
         .spawn(move || {
@@ -69,7 +96,7 @@ pub fn spawn_hotkey_thread(cmd_rx: Receiver<HotkeyCommand>, player: Arc<Player>)
                     return;
                 }
             };
-            let mut bindings = Bindings::default();
+            let mut bindings = Bindings::new(combo_tx);
 
             loop {
                 // 1. 处理绑定指令。1. Handle bind commands.
@@ -77,9 +104,10 @@ pub fn spawn_hotkey_thread(cmd_rx: Receiver<HotkeyCommand>, player: Arc<Player>)
                     let HotkeyCommand::Bind {
                         sound_id,
                         hotkey,
+                        passthrough,
                         reply,
                     } = cmd;
-                    let result = bindings.bind(&manager, sound_id, hotkey.as_deref());
+                    let result = bindings.bind(&manager, sound_id, hotkey.as_deref(), passthrough);
                     if let Err(e) = &result {
                         log::warn!("绑定热键失败 failed to bind hotkey for sound {sound_id}: {e}");
                     }
@@ -107,19 +135,48 @@ pub fn spawn_hotkey_thread(cmd_rx: Receiver<HotkeyCommand>, player: Arc<Player>)
         .expect("spawn hotkey thread");
 }
 
+/// 一个音效的绑定。A sound's binding.
+#[derive(Clone)]
+enum Binding {
+    /// 系统热键：独占，前台程序收不到。System hotkey: exclusive, the foreground program
+    /// doesn't get it.
+    System(HotKey),
+    /// 不拦截组合：只旁听。Pass-through combo: observe only.
+    Combo(Combo),
+}
+
+impl Binding {
+    fn same_as(&self, other: &Binding) -> bool {
+        match (self, other) {
+            (Binding::System(a), Binding::System(b)) => a.id() == b.id(),
+            (Binding::Combo(a), Binding::Combo(b)) => a.signature() == b.signature(),
+            _ => false,
+        }
+    }
+}
+
 /// 热键绑定表。Hotkey binding table.
-#[derive(Default)]
 struct Bindings {
-    /// sound_id → 已注册的热键。sound_id → registered hotkey.
-    by_sound: HashMap<SoundId, HotKey>,
+    /// sound_id → 绑定 + 与顺序无关的签名（用于两种方式之间的冲突检查）。
+    /// sound_id → binding + order-independent signature (for conflicts across both kinds).
+    by_sound: HashMap<SoundId, (Binding, Option<Signature>)>,
+    /// 交给钩子的触发通道。Trigger channel handed to the hook.
+    combo_tx: Sender<SoundId>,
 }
 
 impl Bindings {
+    fn new(combo_tx: Sender<SoundId>) -> Self {
+        Self {
+            by_sound: HashMap::new(),
+            combo_tx,
+        }
+    }
+
     fn sound_for(&self, hotkey_id: u32) -> Option<SoundId> {
-        self.by_sound
-            .iter()
-            .find(|(_, hk)| hk.id() == hotkey_id)
-            .map(|(s, _)| *s)
+        self.by_sound.iter().find_map(|(s, (b, _))| match b {
+            Binding::System(hk) if hk.id() == hotkey_id => Some(*s),
+            _ => None,
+        })
     }
 
     fn bind(
@@ -127,42 +184,77 @@ impl Bindings {
         manager: &GlobalHotKeyManager,
         sound_id: SoundId,
         hotkey: Option<&str>,
+        passthrough: bool,
     ) -> Result<(), String> {
-        let new = match hotkey.map(str::trim).filter(|s| !s.is_empty()) {
-            Some(s) => Some(s.parse::<HotKey>().map_err(|e| {
+        let text = hotkey.map(str::trim).filter(|s| !s.is_empty());
+        let new = match text {
+            None => None,
+            Some(s) if passthrough => Some(Binding::Combo(Combo::parse(s)?)),
+            Some(s) => Some(Binding::System(s.parse::<HotKey>().map_err(|e| {
                 trf!(
                     "无法识别快捷键「{s}」：{e}",
                     "Unrecognised hotkey \"{s}\": {e}"
                 )
-            })?),
-            None => None,
+            })?)),
         };
-        let old = self.by_sound.get(&sound_id).copied();
-        if new.map(|h| h.id()) == old.map(|h| h.id()) {
-            return Ok(()); // 没变化。Unchanged.
+        let old = self.by_sound.get(&sound_id).map(|(b, _)| b.clone());
+        match (&new, &old) {
+            (None, None) => return Ok(()),
+            (Some(n), Some(o)) if n.same_as(o) => return Ok(()), // 没变化。Unchanged.
+            _ => {}
         }
-        if let Some(hk) = new {
-            if let Some(other) = self.sound_for(hk.id()) {
+
+        // 与其它音效冲突（两种方式之间也算）。Conflicts with other sounds (across both kinds).
+        let signature = text
+            .and_then(|s| Combo::parse(s).ok())
+            .map(|c| c.signature());
+        if let Some(sig) = &signature {
+            let other = self
+                .by_sound
+                .iter()
+                .find(|(id, (_, s))| **id != sound_id && s.as_ref() == Some(sig))
+                .map(|(id, _)| *id);
+            if let Some(other) = other {
                 return Err(trf!(
                     "该快捷键已被音效 #{other} 使用",
                     "This hotkey is already used by sound #{other}"
                 ));
             }
-            manager.register(hk).map_err(|e| {
+        }
+
+        // 先让新的生效，再释放旧的。Activate the new one first, then release the old one.
+        match &new {
+            Some(Binding::System(hk)) => manager.register(*hk).map_err(|e| {
                 trf!(
                     "快捷键已被其他程序占用或不可用：{e}",
                     "The hotkey is taken by another program or unavailable: {e}"
                 )
-            })?;
+            })?,
+            Some(Binding::Combo(_)) => passthrough::start(self.combo_tx.clone())?,
+            None => {}
         }
-        if let Some(hk) = old {
+        if let Some(Binding::System(hk)) = old {
             let _ = manager.unregister(hk);
         }
         match new {
-            Some(hk) => self.by_sound.insert(sound_id, hk),
+            Some(b) => self.by_sound.insert(sound_id, (b, signature)),
             None => self.by_sound.remove(&sound_id),
         };
+        self.publish_combos();
         Ok(())
+    }
+
+    /// 把当前所有「不拦截」组合交给钩子。Hand all current pass-through combos to the hook.
+    fn publish_combos(&self) {
+        let combos = self
+            .by_sound
+            .iter()
+            .filter_map(|(id, (b, _))| match b {
+                Binding::Combo(c) => Some((*id, c.clone())),
+                Binding::System(_) => None,
+            })
+            .collect();
+        passthrough::set_combos(combos);
     }
 }
 

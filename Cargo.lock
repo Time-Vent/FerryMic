@@ -4111,6 +4111,7 @@ dependencies = [
  "soundboard",
  "sys-locale",
  "tokio",
+ "tower",
  "trash",
  "windows-sys 0.59.0",
 ]

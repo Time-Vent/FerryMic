@@ -18,6 +18,7 @@ microphone, so the people on the other end hear both your voice and the effects.
 - ✅ **Defaults for new sounds**: exclusive, play once, 0 dB, 1.0× by default; editable in Settings, and can be applied to all existing sounds in one click
 - ✅ **Seek bar**: drag the bar at the bottom of a playing card to jump
 - ✅ **Global hotkeys**: record a key combo; works while other programs are full-screen
+- ✅ **Pass-through combos** (Windows): e.g. "push-to-talk + a digit" — FerryMic plays the sound and the keys still reach the game (weapon switching keeps working); mouse side buttons work too
 - ✅ **Appearance**: dark / light / follow system, 7 accent presets + custom; the app icon can follow the accent colour
 - ✅ **Sound sites**: the globe button on the left lists free / open sound websites (Freesound, Pixabay, Mixkit, BBC and more), and you can add your own;
   in the app they open in a preview window, and audio files downloaded there go straight into the "Downloads" folder of your library
@@ -96,12 +97,16 @@ cargo run --release --bin soundbridge-server
    - double-arrow icon: loop / once (click a looping card again to stop it);
    - dot / two overlapping circles: exclusive / overlap (exclusive stops other playing sounds);
    - volume: opens a vertical slider; speed: click for the next preset, right-click for the previous one;
-   - "⋯" opens the full editor (name, folder, hotkey, delete).
+   - "⋯" opens the full editor (name, folder, hotkey, delete). A hotkey can use "Don't block keys (in-game combo)":
+     hold your push-to-talk key (or any key), press the trigger key while recording; the keys still reach the game (Windows only).
 5. **Microphone**: the mic bar at the bottom mutes, sets the volume and shows the level; a hardware mic is picked automatically, or choose one under Settings → "Audio chain".
 6. **Connect other apps**: Settings → "Audio chain" → "Output line": pick a virtual cable (e.g. `CABLE Input`).
-   The bottom bar then shows "Mic to pick in other apps: CABLE Output" — choose it as the microphone in the app you use.
-   When the output is a speaker, the bottom bar turns into a yellow warning (other apps can't hear it).
-7. **Monitor**: the headphones button at the bottom toggles the monitor, which also plays effects on your headphones; device and volume are in Settings.
+   Hover the rightmost icon in the bottom bar to see the mic to pick in other apps (e.g. CABLE Output) — choose it as the
+   microphone in the app you use; clicking the icon opens Settings → "Audio chain". When the output is a speaker, it turns
+   into a yellow warning icon (other apps can't hear it).
+7. **Monitor**: click the headphones button at the bottom to toggle the monitor; while it's on, hovering the button slides out
+   a volume bar for "what you hear" (what others hear doesn't change). The monitor device is chosen in Settings. The phone
+   remote can toggle it and set the volume too (the bar stays visible there while it's on).
 8. **Phone remote**: click the phone icon on the left, turn it on and scan the QR code with your phone.
 9. **Find sounds**: click the globe icon on the left for "Sound sites"; "Preview" opens a site in an app window where you can listen.
    Clicking the site's download button there saves audio files straight into the library's "Downloads" folder (other files go to the system downloads folder as usual);
@@ -188,7 +193,7 @@ Output priority: `SOUNDBRIDGE_OUTPUT_DEVICE` > last choice > system default.
 - The phone remote listens on the local network on its own port (main port + 1), which closes when you turn it off; the desktop UI always listens on `127.0.0.1` only.
 - The address carries an access code `?t=…`, remembered in a cookie on the phone after scanning; devices without the code can't open it.
   After "New access code", phones that scanned before have to scan again.
-- Phones can't change computer-side options such as devices, settings or the library location; they can only play / stop / edit sounds.
+- Phones can't change computer-side options such as devices, settings or the library location; they can play / stop / edit sounds, and toggle the monitor and set its volume.
 
 ## Architecture
 
@@ -237,7 +242,7 @@ See [Soundboard architecture](docs/en/soundboard-architecture.md).
 | POST / PATCH / DELETE | `/api/folders` | Create `{path}` / rename or move `{from, to}` / delete an empty folder `{path}` |
 | GET | `/api/sounds` | List sounds |
 | POST | `/api/sounds/import` | Upload (multipart: `file`, optional `folder`) |
-| PATCH | `/api/sounds/:id` | Edit `{name?, folder?, looping?, exclusive?, gain_db?, speed?, hotkey?}`; `name` renames the file, `folder` moves it, `hotkey: null` clears |
+| PATCH | `/api/sounds/:id` | Edit `{name?, folder?, looping?, exclusive?, gain_db?, speed?, hotkey?, hotkey_passthrough?}`; `name` renames the file, `folder` moves it, `hotkey: null` clears |
 | DELETE | `/api/sounds/:id` | Delete (the file goes to the recycle bin) |
 | POST | `/api/sounds/:id/trigger` · `/stop` | Trigger / stop |
 | POST | `/api/sounds/:id/seek` | Seek `{position: 0..1}` |

@@ -380,7 +380,8 @@ cmd_tx.send(BoardCommand::AddSound(Box::new(loaded)))?;
 | `remote.rs` | `RemoteServer`：手机遥控监听的启动 / 停止、访问码中间件 `require_token`、`qr_svg` |
 | `settings.rs` | `SettingsStore`：读写 `settings.json`；`data_dir()`（按平台）；`CloseAction` |
 | `i18n.rs` | 界面语言：`apply` / `is_en`，宏 `tr!` / `trf!` 按语言生成提示与错误 |
-| `hotkeys.rs` | 全局热键线程（Win32 消息循环 + 绑定请求），按下时调用 `Player::trigger` |
+| `hotkeys.rs` | 全局热键线程（Win32 消息循环 + 绑定请求），按下时调用 `Player::trigger`；统一管理两种绑定 |
+| `passthrough.rs` | 「不拦截」组合键：`Combo` 解析与匹配，Windows 底层键盘 / 鼠标钩子（只旁听、照样放行） |
 | `virtual_mic.rs` | Linux 虚拟麦克风：`pactl` 创建 / 接管 / 卸载模块 |
 
 ### 启动顺序（`run`）
@@ -444,7 +445,8 @@ cmd_tx.send(BoardCommand::AddSound(Box::new(loaded)))?;
 
 ### 热键线程（`hotkeys.rs`）
 
-- `Bindings::bind`：解析 → 检查是否被其它音效占用 → 注册新键 → 注销旧键 → 更新表。
+- `Bindings::bind(sound, hotkey, passthrough)`：解析（系统热键或 `Combo`）→ 按签名检查是否被其它音效占用 →
+  让新的生效（注册系统热键或启动钩子）→ 释放旧的 → 更新表并把所有组合交给钩子（`passthrough::set_combos`）。
 - `pump_messages`：Windows 上分发 `WM_HOTKEY`，没有它热键不会触发；其它平台为空函数。
 
 ### `MicControl`（`mic.rs`）

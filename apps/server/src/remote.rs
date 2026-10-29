@@ -28,9 +28,9 @@ use tokio::sync::oneshot;
 /// cookie 名。Cookie name.
 const COOKIE: &str = "sb_token";
 
-/// 只允许在电脑本机调用的接口（手机遥控不能改电脑的设置、开关遥控、操作文件管理器）。
+/// 只允许在电脑本机调用的接口（手机遥控不能改电脑的设置、开关遥控、操作文件管理器、关闭窗口）。
 /// Endpoints allowed only on the PC itself (the phone can't change PC settings, toggle
-/// the remote or drive the file manager).
+/// the remote, drive the file manager or close the window).
 const DESKTOP_ONLY: &[&str] = &[
     "/api/remote",
     "/api/settings",
@@ -38,9 +38,20 @@ const DESKTOP_ONLY: &[&str] = &[
     "/api/library/location",
     "/api/library/open",
     "/api/output",
-    "/api/monitor",
     "/api/open-url",
+    "/api/window",
 ];
+// 注意：`/api/monitor` 不在这里——手机可以开关试听、调试听音量（只影响电脑主人自己耳机里的声音），
+// 但不能换试听设备，由处理函数根据 [`FromPhone`] 拒绝。
+// Note: `/api/monitor` isn't listed — phones may toggle the monitor and set its volume
+// (only what the computer's owner hears in their headphones), but not change the
+// monitor device; the handler refuses that based on [`FromPhone`].
+
+/// 请求来自手机遥控（由 `require_token` 放进请求扩展，处理函数可据此区分）。
+/// The request came through the phone remote (put into the request extensions by
+/// `require_token`, so handlers can tell).
+#[derive(Debug, Clone, Copy)]
+pub struct FromPhone;
 
 /// 遥控状态（供界面显示）。Remote status (for the UI).
 #[derive(Debug, Clone, Serialize)]
@@ -158,7 +169,7 @@ impl RemoteServer {
 /// 局域网请求必须带访问码（网址参数或 cookie）。LAN requests need the code (URL or cookie).
 async fn require_token(
     State(remote): State<Arc<RemoteServer>>,
-    req: Request,
+    mut req: Request,
     next: Next,
 ) -> Response {
     let path = req.uri().path();
@@ -202,6 +213,7 @@ async fn require_token(
         )
             .into_response();
     }
+    req.extensions_mut().insert(FromPhone);
     let mut res = next.run(req).await;
     if from_query && !from_cookie {
         // 记住访问码：之后不带参数也能打开（一年）。Remember the code for a year.
@@ -245,6 +257,54 @@ pub fn qr_svg(text: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 手机请求：带访问码可以调试听并被标记为「来自手机」；电脑端专属接口仍被拒；没有访问码 401。
+    /// Phone requests: with the code, the monitor endpoint is allowed and marked as
+    /// "from phone"; desktop-only endpoints stay blocked; no code means 401.
+    #[tokio::test]
+    async fn phone_requests_are_marked_and_desktop_only_is_blocked() {
+        use axum::body::Body;
+        use axum::routing::post;
+        use tower::ServiceExt;
+
+        let remote = Arc::new(RemoteServer::new("abc123".into(), 0));
+        let app = Router::new()
+            .route(
+                "/api/monitor",
+                post(|phone: Option<axum::Extension<FromPhone>>| async move {
+                    if phone.is_some() {
+                        "phone"
+                    } else {
+                        "desktop"
+                    }
+                }),
+            )
+            .route("/api/output", post(|| async { "ok" }))
+            .layer(axum::middleware::from_fn_with_state(
+                remote.clone(),
+                require_token,
+            ));
+        let req = |path: &str| axum::http::Request::post(path).body(Body::empty()).unwrap();
+
+        let res = app
+            .clone()
+            .oneshot(req("/api/monitor?t=abc123"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
+        assert_eq!(&body[..], b"phone");
+
+        let res = app
+            .clone()
+            .oneshot(req("/api/output?t=abc123"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        let res = app.oneshot(req("/api/monitor")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
 
     #[test]
     fn tokens_are_random_and_well_formed() {
