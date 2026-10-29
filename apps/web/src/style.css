@@ -1281,18 +1281,15 @@ body:not(.view-sites) #sites-view {
   flex-direction: column;
 }
 
-.sites-intro {
-  padding: 0 24px;
-}
-
-.sites-intro span {
-  margin-right: 4px;
-}
-
 .sites-grid {
   flex: 1;
   overflow-y: auto;
   padding: 0 24px 24px;
+}
+
+.sites-empty {
+  margin-top: 24px;
+  text-align: center;
 }
 
 .sites-heading {

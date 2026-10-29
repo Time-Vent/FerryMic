@@ -1515,6 +1515,14 @@ function setupSettings(): void {
 // ---- 音效资源 Sound sites ----
 
 let view: 'library' | 'sites' = 'library';
+/** 音效资源页的搜索词。Search text on the sound sites page. */
+let siteQuery = '';
+
+/** 网站是否匹配搜索词（名称、网址、介绍、授权）。Whether a site matches the search text. */
+function siteMatches(...fields: string[]): boolean {
+  const q = siteQuery.trim().toLowerCase();
+  return !q || fields.some((f) => f.toLowerCase().includes(q));
+}
 
 /** 切换主区域：音效库 / 音效资源。Switch the main area: library / sound sites. */
 function setView(next: 'library' | 'sites'): void {
@@ -1530,16 +1538,30 @@ function renderSites(): void {
   grid.innerHTML = '';
   const custom = appInfo?.custom_sites ?? [];
 
-  grid.append(el('h2', 'sites-heading', t('推荐网站')));
-  const builtin = el('div', 'sites-cards');
-  for (const s of BUILTIN_SITES) builtin.append(siteCard(s.name, s.url, t(s.desc), t(s.license), null));
-  grid.append(builtin);
+  const builtinHits = BUILTIN_SITES.filter((s) => siteMatches(s.name, s.url, t(s.desc), t(s.license), s.desc));
+  const customHits = custom.map((c, i) => [c, i] as const).filter(([c]) => siteMatches(c.name, c.url));
+  const searching = siteQuery.trim() !== '';
 
-  grid.append(el('h2', 'sites-heading', t('我添加的')));
-  const mine = el('div', 'sites-cards');
-  if (!custom.length) mine.append(el('p', 'hint', t('还没有添加网址。点右上角「添加网址」，把常用的音效网站收藏到这里。')));
-  custom.forEach((c, i) => mine.append(siteCard(c.name, c.url, '', '', i)));
-  grid.append(mine);
+  if (builtinHits.length || !searching) {
+    grid.append(el('h2', 'sites-heading', t('推荐网站')));
+    const builtin = el('div', 'sites-cards');
+    for (const s of builtinHits) builtin.append(siteCard(s.name, s.url, t(s.desc), t(s.license), null));
+    grid.append(builtin);
+  }
+
+  // 搜索时没有命中就整组隐藏；不搜索时始终显示「我添加的」（含空状态提示）。
+  // While searching, hide a group with no hits; otherwise always show "My sites".
+  if (customHits.length || !searching) {
+    grid.append(el('h2', 'sites-heading', t('我添加的')));
+    const mine = el('div', 'sites-cards');
+    if (!custom.length) mine.append(el('p', 'hint', t('还没有添加网址。点右上角「添加网址」，把常用的音效网站收藏到这里。')));
+    for (const [c, i] of customHits) mine.append(siteCard(c.name, c.url, '', '', i));
+    grid.append(mine);
+  }
+
+  if (searching && !builtinHits.length && !customHits.length) {
+    grid.append(el('p', 'hint sites-empty', t('没有找到「{query}」相关的网站', { query: siteQuery.trim() })));
+  }
 
   $('sites-count').textContent = t('{n} 个网站', { n: BUILTIN_SITES.length + custom.length });
 }
@@ -1557,14 +1579,14 @@ function siteCard(name: string, url: string, desc: string, license: string, cust
   const actions = el('div', 'site-actions');
   const open = el('button', 'btn primary small');
   open.type = 'button';
-  open.innerHTML = `${icons.globe}<span>${appInfo?.is_app ? t('预览') : t('打开')}</span>`;
+  open.innerHTML = appInfo?.is_app ? `${icons.eye}<span>${t('预览')}</span>` : `${icons.globe}<span>${t('打开')}</span>`;
   open.title = url;
   open.addEventListener('click', () => openSite(url, name, false));
   actions.append(open);
   // App 里另给一个「在浏览器中打开」（需要登录的网站在常用浏览器里更方便）。
   // In the app, also offer "open in browser" (handy for sites needing your usual login).
   if (appInfo?.is_app) {
-    const ext = iconButton('icon-btn small', 'external', t('在浏览器中打开'));
+    const ext = iconButton('icon-btn small', 'globe', t('在浏览器中打开'));
     ext.addEventListener('click', () => openSite(url, name, true));
     actions.append(ext);
   }
@@ -1642,6 +1664,10 @@ async function deleteSite(index: number): Promise<void> {
 function setupSites(): void {
   $('view-library').addEventListener('click', () => setView('library'));
   $('view-sites').addEventListener('click', () => setView('sites'));
+  $<HTMLInputElement>('sites-search').addEventListener('input', (e) => {
+    siteQuery = (e.target as HTMLInputElement).value;
+    renderSites();
+  });
   $('add-site').addEventListener('click', async () => {
     const site = await askSite();
     if (site) await saveSites([...(appInfo?.custom_sites ?? []), site]);
@@ -1957,6 +1983,8 @@ $<HTMLInputElement>('search').addEventListener('input', (e) => {
 });
 $('stop-all').addEventListener('click', () => api.stopAll().catch((e) => toast(errorText(e), 'error')));
 // 回到窗口时重新扫描（可能在资源管理器里改过文件）。Rescan on focus (files may have changed).
+// 预览窗口里下载完成后，App 通知这里重新扫描。The app asks for a rescan after a preview download.
+window.addEventListener('ferrymic:rescan', () => rescan(true));
 let lastFocusScan = 0;
 window.addEventListener('focus', () => {
   if (Date.now() - lastFocusScan > 2000) {

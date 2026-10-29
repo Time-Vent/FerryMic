@@ -38,7 +38,9 @@ use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::DownloadEvent;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 
 /// 主窗口标签。Main window label.
 const MAIN: &str = "main";
@@ -46,6 +48,11 @@ const MAIN: &str = "main";
 const TRAY: &str = "tray";
 /// 音效资源预览窗口标签。Sound-site preview window label.
 const BROWSE: &str = "browse";
+/// 预览窗口里的标题栏与网站两块网页。The title-bar and site webviews in the preview window.
+const BROWSE_BAR: &str = "browse-bar";
+const BROWSE_SITE: &str = "browse-site";
+/// 自绘标题栏高度（逻辑像素）。Custom title bar height (logical px).
+const BAR_HEIGHT: f64 = 38.0;
 /// 默认主题色的色相（图标原图的主色）。Hue of the default accent (the icon's base hue).
 const BASE_HUE: f32 = 246.1;
 
@@ -218,53 +225,130 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 /// 音效资源网站的预览窗口：在 App 里浏览网站、试听，下载的音频文件直接存进音效库。
 /// Preview window for sound sites: browse and listen inside the app; downloaded audio
 /// files are saved straight into the sound library.
-fn open_browse_window(app: &AppHandle, url: &str, title: &str) -> Result<(), String> {
+///
+/// 窗口没有系统标题栏，由两块网页组成：上面是本地的标题栏（网站名、地址、在浏览器中打开、
+/// 最小化 / 最大化 / 关闭），下面是网站本身。系统标题栏放不进自定义按钮，所以自己画。
+/// The window has no system title bar and holds two webviews: a local title bar on top
+/// (site name, address, open in browser, minimize / maximize / close) and the site
+/// below. The system title bar can't host custom buttons, hence the custom one.
+fn open_browse_window(app: &AppHandle, url: &str, name: &str) -> Result<(), String> {
     let parsed: tauri::Url = url.parse().map_err(|e| format!("{e}"))?;
-    let title = if title.is_empty() {
-        "FerryMic".to_string()
+    let host = parsed
+        .host_str()
+        .unwrap_or_default()
+        .trim_start_matches("www.")
+        .to_string();
+    let name = if name.is_empty() {
+        host.clone()
     } else {
-        format!("{title} - FerryMic")
+        name.to_string()
     };
+    let window_title = format!("{name} - FerryMic");
+
     // 已打开：换网址并提到前台。Already open: navigate and bring to front.
-    if let Some(w) = app.get_webview_window(BROWSE) {
-        w.navigate(parsed).map_err(|e| e.to_string())?;
-        let _ = w.set_title(&title);
+    if let (Some(w), Some(site)) = (app.get_window(BROWSE), app.get_webview(BROWSE_SITE)) {
+        site.navigate(parsed).map_err(|e| e.to_string())?;
+        let _ = w.set_title(&window_title);
+        if let Some(bar) = app.get_webview(BROWSE_BAR) {
+            let _ = bar.eval(format!(
+                "window.__ferrySetTitle({}, {})",
+                js_str(&name),
+                js_str(&host)
+            ));
+        }
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
         return Ok(());
     }
-    WebviewWindowBuilder::new(app, BROWSE, WebviewUrl::External(parsed))
-        .title(title)
+
+    let window = tauri::window::WindowBuilder::new(app, BROWSE)
+        .title(&window_title)
         .inner_size(1100.0, 760.0)
         .min_inner_size(480.0, 360.0)
         .center()
-        .on_download(|webview, event| {
-            // 音频文件改存到音效库的「下载」文件夹；其它文件照常进系统下载目录。
-            // Audio files go to the library's "Downloads" folder; anything else goes to
-            // the system downloads folder as usual.
-            if let DownloadEvent::Requested { destination, .. } = event {
-                let name = destination
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                if soundbridge_server::is_audio_file(&name) {
-                    if let Some(control) = webview.app_handle().try_state::<Control>() {
-                        let dir = control.settings().library_root().join(download_folder());
-                        if std::fs::create_dir_all(&dir).is_ok() {
-                            *destination = unique_path(&dir, &name);
-                            log::info!(
-                                "下载到音效库 downloading into the library: {}",
-                                destination.display()
-                            );
-                        }
-                    }
-                }
-            }
-            true
-        })
+        .decorations(false)
         .build()
         .map_err(|e| e.to_string())?;
+    let (width, height) = logical_size(&window);
+
+    // 标题栏：本地页面，只开放拖动和窗口按钮的权限（capabilities/preview-titlebar.json）。
+    // Title bar: a local page with only drag and window-button permissions
+    // (capabilities/preview-titlebar.json).
+    let handle = app.clone();
+    let bar =
+        tauri::webview::WebviewBuilder::new(BROWSE_BAR, WebviewUrl::App("titlebar.html".into()))
+            .initialization_script(format!(
+                "window.__FERRY_INIT__ = {{ title: {}, host: {}, openTitle: {} }};",
+                js_str(&name),
+                js_str(&host),
+                js_str(tr_open_in_browser())
+            ))
+            .on_navigation(move |url| {
+                // 「在浏览器中打开」：跳到保留地址，拦下来，用系统浏览器打开网站当前的网址。
+                // 取网址要等主线程，放到单独线程里。
+                // "Open in browser": navigates to a reserved address; intercept it and open
+                // the site's current URL in the system browser. Reading the URL waits on the
+                // main thread, so do it on a separate thread.
+                if url.host_str() != Some(OPEN_EXTERNAL_HOST) {
+                    return true;
+                }
+                let handle = handle.clone();
+                std::thread::spawn(move || {
+                    let current = handle.get_webview(BROWSE_SITE).and_then(|w| w.url().ok());
+                    if let Some(current) =
+                        current.filter(|u| soundbridge_server::is_web_url(u.as_str()))
+                    {
+                        if let Err(e) = soundbridge_server::open_in_browser(current.as_str()) {
+                            log::warn!("无法打开浏览器 can't open the browser: {e}");
+                        }
+                    }
+                });
+                false
+            });
+    window
+        .add_child(
+            bar,
+            LogicalPosition::new(0.0, 0.0),
+            LogicalSize::new(width, BAR_HEIGHT),
+        )
+        .map_err(|e| e.to_string())?;
+
+    // 网站：下载提示脚本（普通脚本，网页没有任何 Tauri 权限）；下载的音频存进音效库。
+    // The site: the download-notice script (plain script; the page has no Tauri
+    // permissions); downloaded audio goes into the library.
+    let site = tauri::webview::WebviewBuilder::new(BROWSE_SITE, WebviewUrl::External(parsed))
+        .initialization_script(PREVIEW_SCRIPT)
+        .on_page_load(|webview, payload| {
+            // 网站内跳转后更新标题栏里的地址。Update the address in the title bar.
+            let host = payload
+                .url()
+                .host_str()
+                .unwrap_or_default()
+                .trim_start_matches("www.")
+                .to_string();
+            if let Some(bar) = webview.app_handle().get_webview(BROWSE_BAR) {
+                let _ = bar.eval(format!("window.__ferrySetHost({})", js_str(&host)));
+            }
+        })
+        .on_download(handle_download);
+    window
+        .add_child(
+            site,
+            LogicalPosition::new(0.0, BAR_HEIGHT),
+            LogicalSize::new(width, (height - BAR_HEIGHT).max(1.0)),
+        )
+        .map_err(|e| e.to_string())?;
+
+    // 窗口大小变化时，标题栏宽度跟着变、网站填满其余部分。
+    // On resize the title bar follows the width and the site fills the rest.
+    let handle = app.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } = event {
+            layout_browse_window(&handle);
+        }
+    });
+
     // 新窗口也跟随主题色图标。The new window follows the tinted icon too.
     if let Some(control) = app.try_state::<Control>() {
         let s = control.settings();
@@ -272,6 +356,149 @@ fn open_browse_window(app: &AppHandle, url: &str, title: &str) -> Result<(), Str
         let _ = app.run_on_main_thread(move || apply_icon(&h, &accent, tint));
     }
     Ok(())
+}
+
+/// 窗口内容区的逻辑尺寸。The window's inner size in logical pixels.
+fn logical_size(window: &tauri::Window) -> (f64, f64) {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    window
+        .inner_size()
+        .map(|s| {
+            let s = s.to_logical::<f64>(scale);
+            (s.width, s.height)
+        })
+        .unwrap_or((1100.0, 760.0))
+}
+
+/// 按窗口大小摆放标题栏与网站。Lay out the title bar and the site for the window size.
+fn layout_browse_window(app: &AppHandle) {
+    let Some(window) = app.get_window(BROWSE) else {
+        return;
+    };
+    let (width, height) = logical_size(&window);
+    if let Some(bar) = app.get_webview(BROWSE_BAR) {
+        let _ = bar.set_position(LogicalPosition::new(0.0, 0.0));
+        let _ = bar.set_size(LogicalSize::new(width, BAR_HEIGHT));
+    }
+    if let Some(site) = app.get_webview(BROWSE_SITE) {
+        let _ = site.set_position(LogicalPosition::new(0.0, BAR_HEIGHT));
+        let _ = site.set_size(LogicalSize::new(width, (height - BAR_HEIGHT).max(1.0)));
+    }
+}
+
+/// 预览窗口的下载：音频文件改存到音效库的「下载」文件夹，已有同名文件就不再重复下载；
+/// 其它文件照常进系统下载目录。开始 / 完成 / 跳过 / 失败都在窗口里提示。
+/// Downloads in the preview window: audio files go to the library's "Downloads" folder,
+/// skipped when a file of the same name is already there; anything else goes to the
+/// system downloads folder as usual. Start / finish / skip / failure show a notice.
+fn handle_download(webview: tauri::Webview, event: DownloadEvent<'_>) -> bool {
+    let en = soundbridge_server::i18n::is_en();
+    let toast = |text: String, kind: &str| {
+        let _ = webview.eval(format!(
+            "window.__ferryToast && window.__ferryToast({}, {})",
+            js_str(&text),
+            js_str(kind)
+        ));
+    };
+    match event {
+        DownloadEvent::Requested { url, destination } => {
+            let name = destination
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if !soundbridge_server::is_audio_file(&name) {
+                return true;
+            }
+            let Some(control) = webview.app_handle().try_state::<Control>() else {
+                return true;
+            };
+            let dir = control.settings().library_root().join(download_folder());
+            if dir.join(&name).exists() {
+                toast(
+                    if en {
+                        format!("Already in your library, not downloaded again: {name}")
+                    } else {
+                        format!("音效库里已经有了，没有重复下载：{name}")
+                    },
+                    "warn",
+                );
+                // 取消后还会收到一次「失败」：记下来，别提示。
+                // Cancelling still reports a "failure": remember it so it stays quiet.
+                skipped_downloads().lock().unwrap().insert(url.to_string());
+                return false;
+            }
+            if std::fs::create_dir_all(&dir).is_ok() {
+                *destination = dir.join(&name);
+                log::info!(
+                    "下载到音效库 downloading into the library: {}",
+                    destination.display()
+                );
+                toast(
+                    if en {
+                        format!("Downloading into your library… {name}")
+                    } else {
+                        format!("正在下载到音效库… {name}")
+                    },
+                    "",
+                );
+            }
+            true
+        }
+        DownloadEvent::Finished { url, path, success } => {
+            if skipped_downloads().lock().unwrap().remove(url.as_str()) {
+                return true;
+            }
+            let name = path
+                .as_deref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let in_library = path.as_deref().is_some_and(|p| {
+                webview
+                    .app_handle()
+                    .try_state::<Control>()
+                    .is_some_and(|c| p.starts_with(c.settings().library_root()))
+            });
+            let (text, kind) = match (success, in_library) {
+                (true, true) => (
+                    if en {
+                        format!(
+                            "Saved to the \"{}\" folder of your library: {name}",
+                            download_folder()
+                        )
+                    } else {
+                        format!("已存入音效库「{}」文件夹：{name}", download_folder())
+                    },
+                    "ok",
+                ),
+                (true, false) => (
+                    if en {
+                        format!("Downloaded (not audio, so not added to the library): {name}")
+                    } else {
+                        format!("已下载（不是音频，没有放进音效库）：{name}")
+                    },
+                    "",
+                ),
+                (false, _) => (
+                    if en {
+                        format!("Download failed: {name}")
+                    } else {
+                        format!("下载失败：{name}")
+                    },
+                    "warn",
+                ),
+            };
+            toast(text, kind);
+            // 主窗口马上重新扫描，新音效直接出现。The main window rescans right away.
+            if success && in_library {
+                if let Some(main) = webview.app_handle().get_webview_window(MAIN) {
+                    let _ = main.eval("window.dispatchEvent(new Event('ferrymic:rescan'))");
+                }
+            }
+            true
+        }
+        _ => true,
+    }
 }
 
 /// 音效库里存放下载的文件夹名（按界面语言）。Library folder for downloads (UI language).
@@ -283,23 +510,45 @@ fn download_folder() -> &'static str {
     }
 }
 
-/// 不覆盖已有文件：重名时加「 (2)」「 (3)」…。Never overwrite: append " (2)", " (3)"… on clashes.
-fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    let first = dir.join(name);
-    if !first.exists() {
-        return first;
+/// 因已存在而跳过的下载（网址）。Downloads skipped because the file exists (by URL).
+fn skipped_downloads() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SKIPPED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SKIPPED.get_or_init(Default::default)
+}
+
+/// 预览窗口注入的脚本。The script injected into the preview window.
+const PREVIEW_SCRIPT: &str = include_str!("../preview/preview.js");
+/// 「在浏览器中打开」按钮跳转的保留地址（.invalid 永远不会解析）。
+/// Reserved host the "open in browser" button navigates to (.invalid never resolves).
+const OPEN_EXTERNAL_HOST: &str = "ferrymic-open.invalid";
+
+fn tr_open_in_browser() -> &'static str {
+    if soundbridge_server::i18n::is_en() {
+        "Open in browser"
+    } else {
+        "在浏览器中打开"
     }
-    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, ""));
-    (2..)
-        .map(|n| {
-            dir.join(if ext.is_empty() {
-                format!("{stem} ({n})")
-            } else {
-                format!("{stem} ({n}).{ext}")
-            })
-        })
-        .find(|p| !p.exists())
-        .expect("有限个文件 finitely many files")
+}
+
+/// 转成 JS 字符串字面量。Encode as a JS string literal.
+fn js_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '<' => out.push_str("\\u003c"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// 托盘菜单（按当前界面语言）。The tray menu (in the current UI language).
@@ -337,7 +586,7 @@ fn apply_icon(app: &AppHandle, accent: &str, tint: bool) {
         base_icon()
     };
     // 主窗口与预览窗口都换。Both the main and the preview window.
-    for w in app.webview_windows().values() {
+    for w in app.windows().values() {
         let _ = w.set_icon(icon.clone());
     }
     if let Some(tray) = app.tray_by_id(TRAY) {
@@ -449,6 +698,11 @@ fn start_server(hooks: Hooks) -> Result<ServerInfo, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn js_str_escapes_quotes_and_markup() {
+        assert_eq!(js_str("a\"b\\c\n</script>"), r#""a\"b\\c\n\u003c/script>""#);
+    }
 
     #[test]
     fn hue_round_trip() {

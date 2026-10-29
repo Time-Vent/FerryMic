@@ -226,6 +226,8 @@ const EN: Record<string, string> = {
 
   // ---- 音效资源 Sound sites ----
   音效资源: 'Sound sites',
+  搜索网站: 'Search sites',
+  '没有找到「{query}」相关的网站': 'No sites match "{query}"',
   推荐网站: 'Recommended',
   我添加的: 'My sites',
   '还没有添加网址。点右上角「添加网址」，把常用的音效网站收藏到这里。':
@@ -242,8 +244,6 @@ const EN: Record<string, string> = {
   网站名称: 'Site name',
   删除网站: 'Remove site',
   '删除「{name}」？': 'Remove "{name}"?',
-  '点「预览」在 App 窗口里打开网站并试听；在预览窗口里下载的音频文件会自动存进音效库的「下载」文件夹。':
-    'Click "Preview" to open a site in an app window and listen there; audio files you download in that window are saved straight into the "Downloads" folder of your library.',
   '最大的开放音效社区之一，数十万条用户上传的音效，可在线试听。':
     'One of the largest open sound communities: hundreds of thousands of user uploads you can preview online.',
   'CC0 / CC BY 等，下载需免费注册': 'CC0 / CC BY etc.; free sign-up to download',
@@ -298,7 +298,7 @@ const EN_HTML: Record<string, string> = {
     <li><b>Output line</b>: the bottom right shows which mic to pick in other apps; choose the virtual cable under "Audio chain" here.</li>
     <li><b>Monitor</b>: once the mix goes to a virtual cable you can't hear it yourself; turn on the headphones button at the bottom and the effects also play on your headphones (without your own voice).</li>
     <li><b>Phone remote</b>: the phone button on the left turns it on or off; scan the QR code to open the same interface on your phone.</li>
-    <li><b>Sound sites</b>: the globe button on the left lists free / open sound websites, and you can add your own; in the app, "Preview" opens a site in a window, and audio you download there is saved straight into the library's "Downloads" folder.</li>`,
+    <li><b>Sound sites</b>: the globe button on the left lists free / open sound websites, and you can add your own; in the app, "Preview" opens a site in a window, and audio you download there is saved straight into the library's "Downloads" folder (a notice appears at the top right, and files already there aren't downloaded again); the globe button at the window's top right opens the page in your browser.</li>`,
   'help-windows': `
     <li>Install a virtual audio cable such as VB-Cable (free).</li>
     <li>Under "Audio chain → Output line" here, pick <code>CABLE Input</code>.</li>

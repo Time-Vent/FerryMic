@@ -14,8 +14,8 @@
         if (t && t.vars) for (const k in t.vars) document.documentElement.style.setProperty(k, t.vars[k]);
       } catch (e) {}
     </script>
-    <script type="module" crossorigin src="/assets/index-CmrgO12V.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-D8jCAeNs.css">
+    <script type="module" crossorigin src="/assets/index-CMz97Nt7.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-B85Nj6Kt.css">
   </head>
   <body>
     <!-- 应用外框：导航栏 + 文件夹栏 + 主区域。App shell: rail + folder sidebar + main. -->
@@ -82,15 +82,16 @@
               <h1>音效资源</h1>
               <span id="sites-count" class="count"></span>
             </div>
+            <label class="search">
+              <span data-icon="search"></span>
+              <input id="sites-search" type="search" placeholder="搜索网站" autocomplete="off" />
+            </label>
             <div class="toolbar-actions">
               <button id="add-site" class="btn primary">
                 <span data-icon="plus"></span><span class="btn-label">添加网址</span>
               </button>
             </div>
           </header>
-          <p class="sites-intro hint">
-            <span class="app-only">点「预览」在 App 窗口里打开网站并试听；在预览窗口里下载的音频文件会自动存进音效库的「下载」文件夹。</span>
-          </p>
           <div id="sites-grid" class="sites-grid"></div>
         </section>
 
@@ -371,7 +372,7 @@
               <li><b>输出音频线路</b>：底部右侧显示其他软件里该选哪个麦克风；本页「音频链路」里选择虚拟音频线。</li>
               <li><b>试听</b>：混音输出到虚拟音频线后自己听不到，打开底部的耳机按钮，音效会同时在耳机里播放（不含你自己的声音）。</li>
               <li><b>手机遥控</b>：左侧手机按钮一键开关，手机扫二维码即可打开同一界面。</li>
-              <li><b>音效资源</b>：左侧地球按钮收集了免费 / 开放的音效网站，也可以添加自己的网址；App 里点「预览」在窗口中打开，在那里下载的音频会自动存进音效库的「下载」文件夹。</li>
+              <li><b>音效资源</b>：左侧地球按钮收集了免费 / 开放的音效网站，也可以添加自己的网址；App 里点「预览」在窗口中打开，在那里下载的音频会自动存进音效库的「下载」文件夹（窗口右上角会提示进度，已有同名文件时不会重复下载）；预览窗口右上角的地球按钮可在浏览器中打开当前网页。</li>
             </ul>
           </details>
           <details id="help-platforms">

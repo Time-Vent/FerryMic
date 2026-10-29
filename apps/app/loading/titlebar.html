@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 音效资源预览窗口的标题栏：网站名、地址、在浏览器中打开、最小化 / 最大化 / 关闭。
+         Title bar of the sound-site preview window: site name, address, open in browser,
+         minimize / maximize / close. -->
+    <style>
+      :root {
+        --bg: #ffffff;
+        --text: #161a22;
+        --muted: #8a92a3;
+        --hover: rgba(16, 24, 40, 0.07);
+        --border: rgba(16, 24, 40, 0.08);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14161b;
+          --text: #eceef3;
+          --muted: #7d8494;
+          --hover: rgba(255, 255, 255, 0.08);
+          --border: rgba(255, 255, 255, 0.07);
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font: 12px/1 system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        user-select: none;
+      }
+      .bar {
+        display: flex;
+        align-items: stretch;
+        height: 100%;
+        border-bottom: 1px solid var(--border);
+      }
+      .drag {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 12px;
+      }
+      .logo {
+        flex: none;
+        width: 16px;
+        height: 16px;
+        color: #7b6cff;
+      }
+      .title {
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .host {
+        min-width: 0;
+        color: var(--muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      button {
+        flex: none;
+        width: 46px;
+        border: none;
+        background: transparent;
+        color: var(--text);
+        display: grid;
+        place-items: center;
+        cursor: default;
+      }
+      button:hover {
+        background: var(--hover);
+      }
+      button svg {
+        width: 16px;
+        height: 16px;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.4;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      #open svg {
+        stroke-width: 1.6;
+      }
+      #close:hover {
+        background: #e81123;
+        color: #fff;
+      }
+      .sep {
+        width: 1px;
+        margin: 9px 4px;
+        background: var(--border);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <!-- 拖动区：按住拖动窗口，双击最大化。Drag area: drag to move, double-click to maximize. -->
+      <div class="drag" data-tauri-drag-region="deep">
+        <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="9" width="2.6" height="6" rx="1.3" fill="currentColor" />
+          <rect x="7.4" y="5" width="2.6" height="14" rx="1.3" fill="currentColor" />
+          <rect x="11.8" y="7.5" width="2.6" height="9" rx="1.3" fill="currentColor" />
+          <rect x="16.2" y="3.5" width="2.6" height="17" rx="1.3" fill="currentColor" />
+          <rect x="20.4" y="10" width="2.2" height="4" rx="1.1" fill="currentColor" />
+        </svg>
+        <span class="title" id="title">FerryMic</span>
+        <span class="host" id="host"></span>
+      </div>
+      <button id="open" title="在浏览器中打开" aria-label="在浏览器中打开">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.4 2.4 3.5 5.3 3.5 8.5s-1.1 6.1-3.5 8.5c-2.4-2.4-3.5-5.3-3.5-8.5s1.1-6.1 3.5-8.5z" /></svg>
+      </button>
+      <div class="sep"></div>
+      <button id="min" aria-label="Minimize"><svg viewBox="0 0 24 24"><path d="M6.5 12h11" /></svg></button>
+      <button id="max" aria-label="Maximize"><svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1" /></svg></button>
+      <button id="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17" /></svg></button>
+    </div>
+    <script>
+      // 窗口按钮走 Tauri 自带的窗口命令（只给这个标题栏开放了这几项权限）。
+      // Window buttons use Tauri's built-in window commands (only these permissions are
+      // granted, and only to this title bar).
+      const invoke = (cmd) => window.__TAURI_INTERNALS__.invoke(cmd, {});
+      document.getElementById('min').onclick = () => invoke('plugin:window|minimize');
+      document.getElementById('max').onclick = () => invoke('plugin:window|toggle_maximize');
+      document.getElementById('close').onclick = () => invoke('plugin:window|close');
+      // 在浏览器中打开：跳到保留地址，由 App 拦下后用系统浏览器打开当前网页。
+      // Open in browser: navigate to a reserved address the app intercepts.
+      document.getElementById('open').onclick = () => {
+        location.href = 'https://ferrymic-open.invalid/';
+      };
+
+      // 由 App 设置标题、地址与按钮提示。Set by the app: title, address and button tooltip.
+      window.__ferrySetTitle = (title, host) => {
+        document.getElementById('title').textContent = title;
+        document.getElementById('host').textContent = host;
+      };
+      window.__ferrySetHost = (host) => {
+        document.getElementById('host').textContent = host;
+      };
+      const init = window.__FERRY_INIT__;
+      if (init) {
+        window.__ferrySetTitle(init.title, init.host);
+        const open = document.getElementById('open');
+        open.title = init.openTitle;
+        open.setAttribute('aria-label', init.openTitle);
+      }
+    </script>
+  </body>
+</html>

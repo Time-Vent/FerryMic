@@ -949,7 +949,7 @@ async fn open_url(
 
 /// 用系统默认浏览器打开（网址已校验为 http(s)）。Open in the default browser (URL already
 /// validated as http(s)).
-fn open_in_browser(url: &str) -> std::io::Result<()> {
+pub fn open_in_browser(url: &str) -> std::io::Result<()> {
     let mut cmd = if cfg!(windows) {
         let mut c = std::process::Command::new("rundll32");
         c.arg("url.dll,FileProtocolHandler");

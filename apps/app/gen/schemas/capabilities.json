@@ -1,1 +1,1 @@
-{}
+{"preview-titlebar":{"identifier":"preview-titlebar","description":"音效资源预览窗口的自绘标题栏：只允许拖动与最小化 / 最大化 / 关闭本窗口。Custom title bar of the sound-site preview window: drag and minimize / maximize / close only.","local":true,"webviews":["browse-bar"],"permissions":["core:window:allow-start-dragging","core:window:allow-internal-toggle-maximize","core:window:allow-minimize","core:window:allow-toggle-maximize","core:window:allow-close"]}}

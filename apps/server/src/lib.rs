@@ -43,7 +43,8 @@ use mic::MicControl;
 use settings::SettingsStore;
 use virtual_mic::{VirtualMic, VirtualMicInfo};
 
-pub use settings::{data_dir, CloseAction, Settings};
+pub use api::open_in_browser;
+pub use settings::{data_dir, is_web_url, CloseAction, Settings};
 
 /// 文件名是否是支持的音频格式（按扩展名）。Whether a file name is a supported audio format
 /// (by extension).

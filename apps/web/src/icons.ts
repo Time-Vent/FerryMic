@@ -69,6 +69,8 @@ export const icons = {
   warning: svg('<path d="M12 4 21 19.5H3z"/><path d="M12 10v4.5M12 17h.01"/>'),
   // 地球（音效资源网站）与铅笔（编辑）。Globe (sound sites) and pencil (edit).
   globe: svg('<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.5 5.3 3.5 8.5s-1.1 6.1-3.5 8.5c-2.4-2.4-3.5-5.3-3.5-8.5s1.1-6.1 3.5-8.5z"/>'),
+  // 眼睛（预览）。Eye (preview).
+  eye: svg('<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>'),
   edit: svg('<path d="M14.5 5.5l4 4M4.5 19.5l1-4.5L15.8 4.7a1.4 1.4 0 0 1 2 0l1.5 1.5a1.4 1.4 0 0 1 0 2L9 18.5z"/>'),
   external: svg('<path d="M13.5 5.5h5v5M18.5 5.5 11 13M17 14v4.5a1 1 0 0 1-1 1H6.5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1H11"/>'),
 };
