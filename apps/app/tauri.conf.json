@@ -13,7 +13,20 @@
     }
   },
   "bundle": {
-    "active": false,
-    "icon": ["icons/icon.png", "icons/icon.ico"]
+    "active": true,
+    "targets": ["nsis", "deb", "appimage"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "category": "Utility",
+    "shortDescription": "Mic + soundboard: mix sound effects into your microphone",
+    "longDescription": "FerryMic mixes your microphone with sound effects and sends the result to a virtual microphone, so other apps hear both your voice and the effects.",
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": { "installMode": "currentUser" }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["pulseaudio-utils", "libxdo3"]
+      }
+    }
   }
 }

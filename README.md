@@ -30,7 +30,32 @@ apps hear both your voice and the effects.
 - ✅ **手机遥控**：左侧一键开关（右上角信号波亮起表示已开启），扫二维码打开；带访问码，即开即关不用重启
 - ✅ **浏览器版**：`soundbridge-server` 用浏览器访问，功能与 App 相同
 
-## 快速开始
+## 下载安装
+
+到 [Releases](https://github.com/Time-Vent/FerryMic/releases) 下载对应平台的文件：
+
+| 平台 | 文件 | 说明 |
+|---|---|---|
+| Windows | `FerryMic_x.y.z_x64-setup.exe` | 安装包：自动安装 WebView2、创建快捷方式，可在「设置 → 应用」卸载 |
+| Windows | `FerryMic_x.y.z_windows_x64.zip` | 绿色版：解压后双击 `FerryMic.exe` |
+| Ubuntu / Debian / Mint | `FerryMic_x.y.z_amd64.deb` | `sudo apt install ./FerryMic_x.y.z_amd64.deb`，依赖自动安装 |
+| 其它 Linux | `FerryMic_x.y.z_amd64.AppImage` | `chmod +x` 后直接运行 |
+
+- Windows 需要另外安装虚拟音频线（如 [VB-Cable](https://vb-audio.com/Cable/)）；Linux 会自动创建虚拟麦克风。
+- 程序没有代码签名，Windows 首次运行时 SmartScreen 可能提示「已保护你的电脑」，点「更多信息 → 仍要运行」。
+- Linux 的全局快捷键需要 X11 会话（Wayland 下请用界面或手机遥控触发）。
+- 设置与默认音效库保存在用户数据目录（见下文「数据目录」），升级或换位置都不会丢。
+
+### 发布新版本（维护者）
+
+1. 修改 `Cargo.toml`（`[workspace.package] version`）与 `apps/app/tauri.conf.json` 里的版本号。
+2. 提交后打标签并推送：`git tag v0.1.0 && git push origin v0.1.0`。
+3. GitHub Actions（`.github/workflows/release.yml`）在 Windows 与 Ubuntu 22.04 上构建上述文件，
+   上传到一个**草稿** Release；检查无误后在 GitHub 上点「Publish」。
+
+每次推送到 `main` 或提交 PR，`.github/workflows/ci.yml` 会在 Windows 与 Linux 上跑格式检查、clippy 和测试。
+
+## 快速开始（从源码构建）
 
 ### Windows 桌面 App（推荐）
 
