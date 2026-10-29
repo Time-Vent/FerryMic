@@ -4,6 +4,8 @@
 
 > This document explains each crate, module, struct, trait and key function, to make the code easier
 > to learn. Each entry says where it is, what it is, why it's designed that way, and how its key methods are used.
+>
+> New to the project? Read the [Learning guide](learning-guide.md) first — it tells you where to start and in what order to read.
 
 ## Contents
 

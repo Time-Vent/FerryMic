@@ -293,6 +293,7 @@ soundbridge in.wav --speed 1.5 --file-gain 0           # 实时播放文件+麦�
 
 ## 文档
 
+- **[学习指南](docs/learning-guide.md)**：从零读懂、运行、测试和修改这个项目（推荐从这里开始）
 - [音效板架构](docs/soundboard-architecture.md)（主产品）
 - [引擎架构](docs/architecture.md)
 - [代码走读](docs/code-walkthrough.md)（逐模块解释，学习用）

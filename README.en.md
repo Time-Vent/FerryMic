@@ -295,6 +295,7 @@ soundbridge in.wav --speed 1.5 --file-gain 0           # play a file + mic in re
 
 ## Documentation
 
+- **[Learning guide](docs/en/learning-guide.md)**: how to read, run, test and modify this project from scratch (start here)
 - [Soundboard architecture](docs/en/soundboard-architecture.md) (the main product)
 - [Engine architecture](docs/en/architecture.md)
 - [Code walkthrough](docs/en/code-walkthrough.md) (module by module, for learning)
