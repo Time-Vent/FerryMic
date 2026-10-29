@@ -1,11 +1,9 @@
 # FerryMic
 
-桌面端「麦克风 + 音效板」小工具：把你的麦克风和音效混在一起，输出到虚拟麦克风，
-游戏语音、会议、直播软件把它当作麦克风，对方就能同时听到你的声音和音效。
+[English](README.en.md) | **简体中文**
 
-A small desktop "mic + soundboard" app: mixes your microphone with sound effects and
-sends the result to a virtual microphone, so game voice chat, meetings and streaming
-apps hear both your voice and the effects.
+桌面端「麦克风 + 音效板」小工具：把你的麦克风和音效混在一起，输出到虚拟麦克风，
+语音、会议、直播等软件把它当作麦克风，对方就能同时听到你的声音和音效。
 
 ## 功能
 
@@ -75,7 +73,7 @@ sudo apt install build-essential pkg-config libasound2-dev libwebkit2gtk-4.1-dev
 ./build-app.sh            # 产物：dist-app/FerryMic/FerryMic
 ```
 
-> Linux 版目前只做了代码适配，尚未在真实 Linux 系统上实测（开发机为 Windows）。
+> Linux 版已在 CI（Ubuntu 22.04）上编译并通过测试，但还没在真实的 Linux 桌面上实际使用过（开发机为 Windows）。
 
 ### 浏览器版
 
@@ -126,7 +124,7 @@ cargo run --release --bin soundbridge-server
 
 ## 平台说明
 
-| 平台 | 虚拟麦克风 | 游戏里选择的麦克风 |
+| 平台 | 虚拟麦克风 | 其他软件里选择的麦克风 |
 |---|---|---|
 | Windows | 安装 VB-Cable 等虚拟音频线；设置里「输出音频线路」选 `CABLE Input` | `CABLE Output` |
 | Linux | FerryMic 启动时**自动创建**（需 `pactl`，PipeWire / PulseAudio 均可），退出时移除 | `FerryMic-Microphone` |
@@ -135,7 +133,7 @@ cargo run --release --bin soundbridge-server
 - Windows：「声音设置」里的默认播放设备保持为耳机或扬声器，不要设成 `CABLE Input`，否则游戏声音也会进麦克风。
 - Linux：全局快捷键需要 X11 会话；Wayland 下请改用 X11 会话，或用界面 / 手机遥控触发。
   cpal 在 Linux 走 ALSA，麦克风建议用「自动」，在系统声音设置里选择默认输入设备。
-- macOS：尚未实测；首次使用需在「隐私与安全性」中允许麦克风权限。
+- macOS：未实测，也没有打包；首次使用需在「隐私与安全性」中允许麦克风权限。
 
 ## 配置
 
@@ -262,7 +260,7 @@ apps/app（桌面 App，Tauri）              apps/server（浏览器版入口�
 ## 目录结构
 
 ```
-soundbridge/
+FerryMic/
 ├── crates/
 │   ├── audio-types/     # 纯数据类型
 │   ├── platform-api/    # 能力 trait 契约
@@ -281,7 +279,7 @@ soundbridge/
 │   └── desktop/         # CLI 演示壳
 ├── build-app.ps1        # Windows 一键构建
 ├── build-app.sh         # Linux 一键构建
-├── docs/                # 架构 + 代码走读 + ADR
+├── docs/                # 架构 + 代码走读 + ADR（英文版在 docs/en/）
 └── tests/fixtures/audio/
 ```
 
@@ -299,6 +297,7 @@ soundbridge in.wav --speed 1.5 --file-gain 0           # 实时播放文件+麦�
 - [引擎架构](docs/architecture.md)
 - [代码走读](docs/code-walkthrough.md)（逐模块解释，学习用）
 - [ADR](docs/adr/)
+- English: [README](README.en.md) · [docs/en/](docs/en/)
 
 ## 许可证
 

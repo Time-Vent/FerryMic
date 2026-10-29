@@ -1,5 +1,7 @@
 # ADR-0001：以 Rust 作为核心实现语言
 
+[English](../en/adr/0001-rust-core.md) | **简体中文**
+
 **状态**：已接受 Accepted
 
 **日期**：2026-10-27

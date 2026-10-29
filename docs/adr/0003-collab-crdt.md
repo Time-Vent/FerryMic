@@ -1,5 +1,7 @@
 # ADR-0003：协作使用 CRDT，且与音频 PCM 严格分离
 
+[English](../en/adr/0003-collab-crdt.md) | **简体中文**
+
 **状态**：预留 Proposed（只写 ADR，不实现）
 
 **日期**：2026-10-27

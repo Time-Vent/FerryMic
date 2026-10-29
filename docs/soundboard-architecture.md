@@ -1,5 +1,7 @@
 # 音效板架构（Soundboard）
 
+[English](en/soundboard-architecture.md) | **简体中文**
+
 > 本文档描述「音效板」功能的技术架构：麦克风 + 音效混合、输出切换与试听、音效库、快捷键触发、
 > 桌面 App（托盘、关闭询问、图标着色）、界面、手机遥控。
 
@@ -27,6 +29,7 @@ apps/app（桌面 App，Tauri）        apps/server/src/main.rs（浏览器版 s
                     ├─ monitor.rs    试听线程：只含音效的混音 → 第二个输出流（耳机 / 扬声器）
                     ├─ remote.rs     手机遥控：局域网监听（端口 + 1）、访问码、二维码，运行中开关
                     ├─ settings.rs   设置持久化（设备、试听、手机遥控、外观、窗口、音效库位置）+ 数据目录
+                    ├─ i18n.rs       界面语言：tr! / trf! 生成给用户看的提示
                     ├─ hotkeys.rs    全局热键线程（Win32 消息循环）
                     ├─ virtual_mic.rs Linux 虚拟麦克风（pactl）
                     └─ （依赖）soundboard crate → audio-source（解码 + 共享 PCM + 变速 + 定位）
@@ -232,6 +235,7 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
   - `Ask`（默认）：`Control::request_close` 置位，界面轮询 `/api/live` 看到 `close_prompt` 后弹出网页内的对话框
     （「最小化到托盘 / 退出 / 取消」+「记住我的选择」），回答经 `POST /api/window` → `on_window_action` 钩子回到外壳。
     用网页对话框而不是原生对话框，样式与主题一致；对话框未响应时（如界面卡死）再点一次 × 直接退出。
+  - 其他窗口（音效资源预览窗口）点关闭只关闭它自己。
 - **图标着色**：主题色变化时（`on_settings` 钩子），把内置图标 `icons/icon.png` 的像素按
   「主题色色相 − 原图色相 246.1°」旋转色相，跳过低饱和度（白色）像素，设为窗口与托盘图标。
   设置 `tint_app_icon` 关闭时恢复原图标。
@@ -256,7 +260,7 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
     首次访问后写入 Cookie `sb_token`，之后不用带参数；没有访问码返回 401 提示页。
   - 「重新生成访问码」后旧码立即失效。
   - 电脑端专属接口（`/api/remote`、`/api/settings`、`/api/pick-folder`、`/api/library/location`、
-    `/api/library/open`、`/api/output`、`/api/monitor`）对手机只允许 GET。
+    `/api/library/open`、`/api/output`、`/api/monitor`、`/api/open-url`）对手机只允许 GET。
 - 面板里显示网址和二维码（`qrcode` crate 生成 SVG，`GET /api/remote/qr.svg`）；
   本机局域网 IP 通过查询路由表得到，不发送数据包。
 - `SOUNDBRIDGE_LAN=1/0` 可强制开关（覆盖设置）。
@@ -265,21 +269,21 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
 
 ## 11. 输出设备、试听与虚拟麦克风
 
-### 11.1 发送给游戏（主输出）
+### 11.1 输出音频线路（主输出）
 
 - 优先级：`SOUNDBRIDGE_OUTPUT_DEVICE`（包含匹配）> 设置 `output_device` > 系统默认。
 - `CpalBackend::resolve_output` 解析设备并取其原生配置（共享模式下的采样率/声道数），
   音效板与麦克风都按该采样率工作。
 - **分类**（`describe_output`）：输入设备里能找到与它构成反馈环的另一端（`game_mic_for`），
-  或名称是虚拟设备 → `Virtual`，并给出游戏里该选的麦克风（如 `CABLE Input` → `CABLE Output`）；
-  否则是 `Speaker`。界面底部显示「游戏麦克风选：…」，输出到扬声器时改为黄色警告。
+  或名称是虚拟设备 → `Virtual`，并给出其他软件里该选的麦克风（如 `CABLE Input` → `CABLE Output`）；
+  否则是 `Speaker`。界面底部显示「其他软件的麦克风选：…」，输出到扬声器时改为黄色警告。
 - **运行中切换**（`POST /api/output`）：输出线程收到 `OutputRequest::Select`，先丢掉旧流，
   新建 `SoundBoard` 并 `reinstall_all` 已解码的音效，再打开新设备；失败则重开原设备并返回 400。
   成功后通知麦克风线程（`OutputChanged`）与试听线程（`MainChanged`），并记住选择。
 
 ### 11.2 试听（`monitor.rs`）
 
-发给游戏的是虚拟音频线，自己听不到音效。试听把**只含音效**的混音再放一份到耳机 / 扬声器：
+输出到虚拟音频线时，自己听不到音效。试听把**只含音效**的混音再放一份到耳机 / 扬声器：
 
 - 输出回调里 `SoundBoard::fill` 之后、叠加麦克风之前，`MonitorTap` 把当前缓冲（下混 / 扩展为立体声）
   写进 SPSC 环；试听线程的第二个输出流用 `MonitorReader` 读出。
@@ -295,7 +299,7 @@ Web API / 全局热键 ──Player──▶（未加载则经加载线程解码
 ```
 FerryMic 输出 ──▶ 虚拟输出 soundbridge_mix（module-null-sink，描述 FerryMic-Mix）
                         └─ monitor ──▶ 虚拟麦克风 soundbridge_mic（module-remap-source，描述 FerryMic-Microphone）
-                                             └─▶ 游戏 / Discord 里选它当麦克风
+                                             └─▶ 其他软件里选它当麦克风
 ```
 
 - 条件：Linux、未指定输出设备（环境变量与设置都没有）、设置 `auto_virtual_mic` 为真（默认）。
@@ -304,13 +308,13 @@ FerryMic 输出 ──▶ 虚拟输出 soundbridge_mix（module-null-sink，描�
 - cpal 在 Linux 走 ALSA，无法按名字选 PulseAudio 设备，所以在打开音频流**之前**设置环境变量
   `PULSE_SINK` / `PIPEWIRE_NODE` = `soundbridge_mix`，让本进程的播放进入虚拟输出（只影响播放）。
 - 失败（如没有 `pactl`）不致命：设置页显示原因，音效照常输出到默认设备。
-- 解析 `pactl` 输出的函数与平台无关，在 Windows 上也有单元测试；整体流程尚未在真实 Linux 上实测。
+- 解析 `pactl` 输出的函数与平台无关，在 Windows 上也有单元测试；Linux 版已在 CI 编译并通过测试，但整体流程尚未在真实 Linux 桌面上实测。
 - Windows / macOS 没有系统自带的虚拟麦克风接口，仍需 VB-Cable / BlackHole 等第三方虚拟音频线（见 ADR-0004）。
 
 ## 12. 界面（`apps/web`）
 
-- 无框架的 TypeScript：`api.ts`（类型 + 请求）、`icons.ts`（自绘 SVG 图标）、`main.ts`（界面逻辑）。
-- **布局**：左侧细导航栏（手机遥控开关——右上角信号波亮起表示已开启、使用说明、设置）、文件夹栏（文件夹树 + 新建 / 刷新 + 音效库位置）、
+- 无框架的 TypeScript：`api.ts`（类型 + 请求）、`icons.ts`（自绘 SVG 图标）、`i18n.ts`（多语言）、`sites.ts`（内置音效网站）、`main.ts`（界面逻辑）。
+- **布局**：左侧细导航栏（音效库、音效资源、手机遥控开关——右上角信号波亮起表示已开启、使用说明、设置）、文件夹栏（文件夹树 + 新建 / 刷新 + 音效库位置）、
   中间音效卡片网格（搜索 / 全部停止 / 导入）、底部常驻条：你的麦克风（静音 / 电平 / 音量）、
   试听按钮（耳机）、输出目标（「其他软件的麦克风选：CABLE Output」，点击打开设置的「音频链路」）。
 - **措辞**：界面不点名具体软件（游戏、Discord 等），统一说「输出音频线路」「其他软件」。
@@ -365,7 +369,7 @@ FerryMic 输出 ──▶ 虚拟输出 soundbridge_mix（module-null-sink，描�
   `--accent`、`--accent-2`（色相偏移 35° 的渐变第二色）、`--accent-soft` / `--accent-glow` / `--accent-line`
   （不同透明度），写到 `<html>` 上；同时存进 `localStorage`，下次启动在页面渲染前先套用，避免闪烁。
   设置本身保存在服务端 `settings.json`（App 端口可能变化，`localStorage` 不可靠）。
-- **使用说明**：设置里内置「基础操作」与「各平台接入游戏 / 语音软件」，当前平台会标出「当前系统」；
+- **使用说明**：设置里内置「基础操作」与「各平台接入其他软件」，当前平台会标出「当前系统」；
   导航栏的「?」按钮直接打开并滚动到这里。
 - **实时状态**：每 100 ms 轮询 `/api/live`（播放中的音效与进度、麦克风电平、是否要弹关闭询问），只更新对应元素不重绘网格；
   每 1 s 轮询 `/api/mic`（设备状态）。播放状态来自输出回调每次写入的 `PlayingSet`，
@@ -377,7 +381,7 @@ FerryMic 输出 ──▶ 虚拟输出 soundbridge_mix（module-null-sink，描�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/app` | 版本、平台、数据目录、音效库位置、输出设备、端口、外观、手机遥控、`is_app`、`tint_app_icon`、`close_action`、`language` / `language_effective`、`sound_defaults`、`custom_sites`、虚拟麦克风状态 |
-| POST | `/api/settings` | 修改设置 `{theme_mode?, accent?, auto_virtual_mic?, tint_app_icon?, close_action?, language?, sound_defaults?}`（改后调用 `on_settings` 钩子） |
+| POST | `/api/settings` | 修改设置 `{theme_mode?, accent?, auto_virtual_mic?, tint_app_icon?, close_action?, language?, sound_defaults?, custom_sites?}`（改后调用 `on_settings` 钩子） |
 | POST | `/api/window` | 回答关闭询问 `{action: "tray" \| "quit" \| "cancel", remember}` |
 | POST | `/api/open-url` | 打开网址 `{url, title?, external}`；只允许 http(s)；App 里默认用预览窗口 |
 | POST | `/api/pick-folder` | 在电脑上弹出系统「选择文件夹」对话框（`rfd`），返回 `{path}` |

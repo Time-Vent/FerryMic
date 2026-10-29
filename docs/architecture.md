@@ -1,5 +1,7 @@
 # FerryMic 架构文档（第一阶段实现版）
 
+[English](en/architecture.md) | **简体中文**
+
 > 本文档描述**已实现**的架构（第一阶段「核心引擎 + 桌面壳」），与设计基线 v1.1 保持一致，
 > 但只记录实际交付的内容。未实现的预留项（loopback、虚拟麦克风、插件隔离、协作）明确标注为「预留」。
 >
@@ -25,7 +27,7 @@ FerryMic 是一个桌面端实时音频混音工具：采集物理麦克风、�
 ## 3. 目录结构（已实现部分）
 
 ```
-soundbridge/
+FerryMic/
 ├── Cargo.toml            # workspace + 统一依赖版本
 ├── rust-toolchain.toml   # 锁定 stable + GNU 目标
 ├── rustfmt.toml / clippy.toml / deny.toml

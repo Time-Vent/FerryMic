@@ -1,5 +1,7 @@
 # ADR-0004：虚拟麦克风分平台实现路径
 
+[English](../en/adr/0004-virtual-mic-per-platform.md) | **简体中文**
+
 **状态**：预留 Proposed（第二阶段先实测）
 
 **日期**：2026-10-27
@@ -15,7 +17,7 @@
 打开，其回调即主时钟。自研 WDM 驱动放后续阶段。
 
 > **已实现**：设置 →「音频链路」→「输出音频线路」在运行中切换输出目标（`POST /api/output`，
-> 不用重启，选择会被记住）。输出按名称分为虚拟音频线 / 扬声器两组，并推算游戏里该选的麦克风
+> 不用重启，选择会被记住）。输出按名称分为虚拟音频线 / 扬声器两组，并推算其他软件里该选的麦克风
 > （虚拟线的另一端，如 `CABLE Input` → `CABLE Output`），界面底部直接显示。
 > （界面称为「其他软件的麦克风」）。输出到虚拟线时自己听不到音效，所以另有「试听」：只含音效的混音同时放到耳机 / 扬声器（第二个输出流）。
 
@@ -30,7 +32,7 @@ filter-chain），PulseAudio module-pipe-source 兜底。
 > **已实现（简化路径）**：`apps/server/src/virtual_mic.rs` 通过 `pactl` 加载
 > `module-null-sink`（`soundbridge_mix`）+ `module-remap-source`（`FerryMic-Microphone`），
 > PipeWire（pipewire-pulse）与 PulseAudio 通用；本进程经 `PULSE_SINK` / `PIPEWIRE_NODE` 环境变量把
-> 播放导入虚拟输出，退出时卸载模块，遗留模块下次启动时接管。尚未在真实 Linux 上实测。
+> 播放导入虚拟输出，退出时卸载模块，遗留模块下次启动时接管。已在 CI（Ubuntu 22.04）编译并通过测试，尚未在真实 Linux 桌面上实测。
 > 直接使用 PipeWire 原生 API 创建 `Audio/Source` 节点仍可作为后续优化。
 
 **移动端**：不提供系统级虚拟麦克风。iOS 沙箱与音频进程模型不允许第三方应用创建全局

@@ -1,5 +1,7 @@
 # FerryMic 代码走读（学习用）
 
+[English](en/code-walkthrough.md) | **简体中文**
+
 > 本文档逐个解释各 crate、模块、结构体、trait 与关键函数的用途，便于学习理解。
 > 每个条目给出：它在哪、它是什么、它为什么这样设计、关键方法怎么用。
 
@@ -381,10 +383,10 @@ cmd_tx.send(BoardCommand::AddSound(Box::new(loaded)))?;
 
 ### 启动顺序（`run`）
 
-1. 读设置（`SettingsStore`）并应用界面语言（`i18n::apply`），决定输出设备：`ServerConfig.output_device` > 上次选择 > 系统默认。
+1. 改名迁移（`migrate_legacy_data_dir`），读设置（`SettingsStore`）并应用界面语言（`i18n::apply`），决定输出设备：`ServerConfig.output_device` > 上次选择 > 系统默认。
 2. Linux 且未指定输出设备时，`VirtualMic::setup()` 创建虚拟麦克风并设置 `PULSE_SINK` / `PIPEWIRE_NODE`
    （必须在打开音频流之前）。
-3. `migrate_v1` 迁移旧版数据，`Library::open(root)` 打开并扫描音效库。
+3. `migrate_v1` 迁移旧版数据，`Library::open_with(root, sound_defaults)` 打开并扫描音效库。
 4. `Player::new` 启动加载线程；建 `MicControl`、`MonitorControl`；
    初始麦克风：`ServerConfig.input_device` > 上次选择 > 自动。
 5. `audio::start_audio(...)`：启动输出线程（打开输出设备、构建输出回调）→ `spawn_mic_thread` →
@@ -409,14 +411,14 @@ cmd_tx.send(BoardCommand::AddSound(Box::new(loaded)))?;
 
 ### 宿主钩子与关闭询问（`lib.rs`）
 
-- `Hooks { on_settings, on_window_action }`：服务库不依赖 Tauri，桌面 App 通过钩子接收「设置变了」
-  （用来给图标着色）和「关闭询问的回答」（隐藏到托盘 / 退出）。
+- `Hooks { on_settings, on_window_action, on_open_url }`：服务库不依赖 Tauri，桌面 App 通过钩子接收「设置变了」
+  （用来给图标着色、重建托盘菜单）、「关闭询问的回答」（隐藏到托盘 / 退出）和「打开网址」（预览窗口）。
 - `Control::request_close()`：置位 `close_prompt` 并返回之前是否已置位——已经在问了还再点 ×，
   说明界面没响应，外壳直接退出。界面经 `/api/live` 看到标记后弹框，`POST /api/window` 回答并清除标记。
 
 ### `Library`（`library.rs`）
 
-- `open(root)`：建目录、读 `.soundbridge.json`、`scan`。
+- `open_with(root, defaults)`：建目录、读 `.soundbridge.json`、`scan`；`set_defaults` 修改之后新发现音效的初始设置。
 - `scan`：递归收集文件夹与音频文件 → 为新文件分配 id → 去掉已不存在的条目 → 写回设置文件 →
   返回 `ScanDiff { added, removed }`。
 - `create_folder` / `rename_folder` / `delete_folder`、`import` / `rename_sound` / `move_sound` / `delete_sound`：
@@ -504,6 +506,9 @@ loop {
 | `src/main.rs` | Tauri 入口：单实例插件、启动服务（传入钩子）、创建窗口、托盘、关闭询问、图标着色 |
 | `tauri.conf.json` | 产品名、标识符、图标；窗口在代码里创建（`windows: []`） |
 | `loading/index.html` | 服务启动失败时显示的错误页 |
+| `loading/titlebar.html` | 音效资源预览窗口的自绘标题栏 |
+| `preview/preview.js` | 注入预览窗口网站的下载提示 |
+| `capabilities/preview-titlebar.json` | App 里唯一的 Tauri 权限：只给预览标题栏拖动与窗口按钮 |
 | `icons/` | 应用图标（`icon.ico` 含 16/32/48/256 尺寸） |
 
 - `start_server()`：开线程 → 建 tokio 运行时 → `block_on(run(config, on_ready))`，通过
@@ -512,9 +517,12 @@ loop {
   否则加载内置错误页。
 - 窗口参数：1080×700、最小 760×520、背景色与界面一致（防白屏闪烁）、关闭 Tauri 拖放拦截。
 - `build_tray`：托盘图标 + 菜单（打开 / 退出，按界面语言；`on_settings` 时 `apply_tray_menu` 重建），左键单击 `show_main`。
-- `on_window_event(CloseRequested)`：按设置 `close_action` 隐藏 / 退出 / 询问（`Control::request_close`）。
-- `open_browse_window(url, title)`：音效资源预览窗口（复用已有的就 `navigate`）；`on_download` 里
-  `is_audio_file` 判断是音频就改保存位置到音效库「下载」文件夹，`unique_path` 避免覆盖。
+- `on_window_event(CloseRequested)`：只管主窗口，按设置 `close_action` 隐藏 / 退出 / 询问（`Control::request_close`）。
+- `open_browse_window(url, name)`：音效资源预览窗口，无系统边框，由标题栏（`browse-bar`）与网站（`browse-site`）两块 webview 组成；
+  已打开就 `navigate` 复用；`layout_browse_window` 在窗口大小变化时重新摆放；标题栏的 `on_navigation` 拦下保留地址
+  `ferrymic-open.invalid`，用系统浏览器打开网站当前网址。
+- `handle_download`：预览窗口里音频文件（`is_audio_file`）存到音效库「下载」文件夹；已有同名文件时取消下载
+  （记在 `skipped_downloads`，取消引起的失败不提示）；开始 / 完成 / 跳过 / 失败经 `js_str` + `eval` 提示。
 - `tinted_icon(accent)`：内置 `icons/icon.png` 逐像素转 HSL，色相旋转「主题色色相 − 246.1°」，
   饱和度很低的像素（白色图案）不动；钩子在后台线程触发，图标在主线程（`run_on_main_thread`）设置。
 - `#![windows_subsystem = "windows"]`：发布版不弹控制台。

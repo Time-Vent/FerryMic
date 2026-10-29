@@ -1,5 +1,7 @@
 # ADR-0002：插件进程隔离策略
 
+[English](../en/adr/0002-plugin-isolation.md) | **简体中文**
+
 **状态**：预留 Proposed（第二阶段实现）
 
 **日期**：2026-10-27
